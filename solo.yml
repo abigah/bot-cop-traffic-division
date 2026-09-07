@@ -1,0 +1,40 @@
+# Visit https://soloterm.com to learn more
+#
+# This repo is a Laravel package, not an application: there is no artisan, no
+# storage/logs and no app to boot. The package's scheduled tasks and queued jobs
+# belong to whichever extranet installs it, so there is nothing here for
+# schedule:work or queue:work to run.
+#
+# To exercise the package at runtime, install it into a host application via a
+# path repository and run Solo from there instead.
+name: bot-cop-traffic-division
+icon: null
+processes:
+  Tests:
+    command: vendor/bin/pest
+    working_dir: null
+    auto_start: false
+    auto_restart: false
+    restart_when_changed: []
+    env: {}
+  Tests (watch):
+    command: vendor/bin/pest --watch
+    working_dir: null
+    auto_start: false
+    auto_restart: false
+    restart_when_changed: []
+    env: {}
+  Lint:
+    command: vendor/bin/pint --test
+    working_dir: null
+    auto_start: false
+    auto_restart: false
+    restart_when_changed: []
+    env: {}
+  Console:
+    command: vendor/bin/testbench list
+    working_dir: null
+    auto_start: false
+    auto_restart: false
+    restart_when_changed: []
+    env: {}

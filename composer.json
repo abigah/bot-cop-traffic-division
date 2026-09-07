@@ -1,0 +1,81 @@
+{
+    "name": "abigah/bot-cop-traffic-division",
+    "description": "The monitoring hub: sites, monitors, heartbeats, incidents, deployments and notifications for Laravel, fed by local checks or a remote prober.",
+    "type": "library",
+    "license": "MIT",
+    "keywords": [
+        "laravel",
+        "monitoring",
+        "uptime",
+        "incidents",
+        "bot-cop"
+    ],
+    "authors": [
+        {
+            "name": "Sheldon Kotyk",
+            "email": "sheldon@kotyk.com"
+        }
+    ],
+    "require": {
+        "php": "^8.3",
+        "ext-openssl": "*",
+        "graham-campbell/guzzle-factory": "^7.0",
+        "guzzlehttp/guzzle": "^7.2",
+        "illuminate/contracts": "^12.0 || ^13.0",
+        "illuminate/support": "^12.0 || ^13.0",
+        "io-developer/php-whois": "^4.1",
+        "jeremykendall/php-domain-parser": "^6.4",
+        "laravel/vonage-notification-channel": "^3.3",
+        "livewire/flux": "^2.12",
+        "livewire/livewire": "^4.0",
+        "symfony/uid": "^7.0 || ^8.0"
+    },
+    "require-dev": {
+        "laravel/pint": "^1.20",
+        "opis/json-schema": "^2.3",
+        "orchestra/testbench": "^10.0 || ^11.0",
+        "pestphp/pest": "^3.0 || ^4.0",
+        "pestphp/pest-plugin-laravel": "^3.0 || ^4.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Abigah\\BotCopTrafficDivision\\": "src/",
+            "Abigah\\BotCopTrafficDivision\\Database\\Factories\\": "database/factories/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Abigah\\BotCopTrafficDivision\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Abigah\\BotCopTrafficDivision\\MonitoringServiceProvider"
+            ],
+            "aliases": {
+                "Monitoring": "Abigah\\BotCopTrafficDivision\\Facades\\Monitoring"
+            }
+        }
+    },
+    "scripts": {
+        "test": "vendor/bin/pest",
+        "lint": "vendor/bin/pint --test",
+        "fix": "vendor/bin/pint",
+        "contracts:init": "git submodule update --init tests/contracts",
+        "contracts:update": "git submodule update --remote tests/contracts",
+        "check": [
+            "@lint",
+            "@test"
+        ]
+    },
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {
+            "pestphp/pest-plugin": true,
+            "php-http/discovery": true
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
