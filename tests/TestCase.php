@@ -36,6 +36,22 @@ abstract class TestCase extends Orchestra
     {
         $app['config']->set('database.default', 'testing');
 
+        /*
+         | Pinned, all of it, because Testbench's skeleton carries a .env that
+         | some of its own commands write on first run — `testbench list` is
+         | enough — and it selects database-backed queue, cache and session
+         | against a skeleton that has none of those tables. The suite then
+         | fails for reasons that have nothing to do with the package, on
+         | whichever machines happen to have run that command.
+         |
+         | A package's harness should not be able to be changed by something in
+         | vendor/, so these say what they need rather than inheriting it.
+         */
+        $app['config']->set('queue.default', 'sync');
+        $app['config']->set('cache.default', 'array');
+        $app['config']->set('session.driver', 'array');
+        $app['config']->set('mail.default', 'array');
+
         // Livewire signs its component snapshots, so the test app needs a key.
         $app['config']->set('app.key', 'base64:'.base64_encode(random_bytes(32)));
         $app['config']->set('monitoring.owner_model', User::class);
