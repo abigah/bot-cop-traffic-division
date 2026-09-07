@@ -197,6 +197,20 @@ Registered under `monitoring.route_prefix` and `monitoring.middleware`, so they
 sit behind whatever authentication the host already uses. Set
 `register_routes` to false to declare them yourself.
 
+The default is `['web', 'auth']`, which is deliberately plain — **check it
+against the application before installing.** `auth:sanctum` would assume a guard
+many applications do not have, and `verified` a user model implementing
+`MustVerifyEmail`; a default naming either fails at boot on an application that
+does neither. Route model binding is appended to whatever is listed, so a stack
+that omits it still resolves `{site}` and `{monitor}`.
+
+Four route groups ignore this setting on purpose, because each is reached by
+something with no session: the prober's API authenticates by HMAC over the raw
+body, the deployment and mute links by a signature in the URL, and the ping and
+report endpoints by a token in the path. Putting the web stack in front of any
+of them would break it — CSRF on a prober's POST, or a login redirect in front
+of a link someone clicked at 3am to stop being paged.
+
 | Route | What it answers |
 |---|---|
 | `/monitoring` | Is anything down, has anything stopped running, is anything throwing errors it did not throw yesterday. |

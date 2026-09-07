@@ -172,8 +172,21 @@ return [
     | When `register_routes` is true the package registers its own routes under
     | the given prefix and middleware. Set it to false to declare them yourself.
     |
-    | The API routes the prober calls are registered separately and are never
-    | behind session middleware: they authenticate by HMAC alone.
+    | `middleware` applies to the screens only. Route model binding is appended
+    | to whatever is listed here, so a stack that omits it still resolves
+    | {site} and {monitor}.
+    |
+    | Three sets of routes deliberately ignore it, because they are reached by
+    | something that has no session: the prober's API authenticates by HMAC, the
+    | deployment and mute links by a signature in the URL, and the ping and
+    | report endpoints by a token in the path. Putting the web stack in front of
+    | any of them would break them — CSRF on a prober's POST, or a login
+    | redirect in front of a link someone clicked at 3am to stop being paged.
+    |
+    | The default is deliberately plain. `auth:sanctum` assumes a guard many
+    | applications do not have, and `verified` assumes the user model
+    | implements MustVerifyEmail; either would fail at boot on an application
+    | that does neither. Tighten it to whatever this one actually uses.
     |
     */
 
@@ -181,7 +194,7 @@ return [
 
     'route_prefix' => '',
 
-    'middleware' => ['web', 'auth:sanctum', 'verified'],
+    'middleware' => ['web', 'auth'],
 
     'api_route_prefix' => 'monitoring',
 

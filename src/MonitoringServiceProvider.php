@@ -108,11 +108,29 @@ class MonitoringServiceProvider extends ServiceProvider
             $this->loadRoutesFrom(__DIR__.'/../routes/deployments.php');
         });
 
+        /*
+         | The screens, behind whatever the host authenticates with. Route
+         | model binding is appended rather than assumed: the host's stack has
+         | no reason to include it, and {site} and {monitor} need it.
+         */
         Route::group([
             'prefix' => config('monitoring.route_prefix', ''),
-            'middleware' => [SubstituteBindings::class],
+            'middleware' => [...config('monitoring.middleware', ['web']), SubstituteBindings::class],
         ], function (): void {
             $this->loadRoutesFrom(__DIR__.'/../routes/monitoring.php');
+        });
+
+        /*
+         | The mute link, signed rather than authenticated, and registered apart
+         | from the screens because route-level middleware adds to a group's
+         | rather than replacing it — inside that group it would inherit the
+         | auth stack it exists to avoid.
+         */
+        Route::group([
+            'prefix' => config('monitoring.route_prefix', ''),
+            'middleware' => ['signed', SubstituteBindings::class],
+        ], function (): void {
+            $this->loadRoutesFrom(__DIR__.'/../routes/mute.php');
         });
 
         Route::group([

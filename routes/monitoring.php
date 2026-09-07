@@ -1,6 +1,5 @@
 <?php
 
-use Abigah\BotCopTrafficDivision\Http\Controllers\MuteIncidentController;
 use Abigah\BotCopTrafficDivision\Livewire\Dashboard;
 use Abigah\BotCopTrafficDivision\Livewire\Incidents;
 use Abigah\BotCopTrafficDivision\Livewire\MonitorHistory;
@@ -11,10 +10,14 @@ use Abigah\BotCopTrafficDivision\Livewire\Sites;
 use Illuminate\Support\Facades\Route;
 
 /*
-| Registered under the prefix and middleware from config('monitoring.*').
+| The screens. Registered under the prefix and middleware from
+| config('monitoring.*'), so they sit behind whatever authentication the host
+| already uses.
 |
-| The mute link is signed rather than authenticated: someone woken at 3am
-| should not have to log in to make the phone stop.
+| The mute link is deliberately not here: it is signed rather than
+| authenticated, and route-level middleware adds to a group's rather than
+| replacing it, so a mute route inside this group would inherit the auth stack
+| it exists to avoid. It lives in mute.php.
 */
 
 /*
@@ -29,7 +32,3 @@ Route::get('/monitoring/monitors/{monitor}', MonitorHistory::class)->name('monit
 Route::get('/monitoring/incidents', Incidents::class)->name('monitoring.incidents');
 Route::get('/monitoring/preferences', NotificationPreferences::class)->name('monitoring.preferences');
 Route::get('/monitoring/probers', Probers::class)->name('monitoring.probers');
-
-Route::get('/incidents/{incident}/mute/{notifiable}', MuteIncidentController::class)
-    ->middleware(['signed'])
-    ->name('monitoring.incident.mute');
