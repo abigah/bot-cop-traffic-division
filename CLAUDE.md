@@ -8,12 +8,17 @@ and the prober-facing API.
 
 ## Read first
 
-- `docs/installation.md` — installing it, both checker modes, the screens, and
-  what SMS needs.
+- `docs/HANDOFF.md` — where things stand and the decisions already made. Not
+  published: it names clients, domains and infrastructure, and is one of two
+  files `bin/publish.php` leaves behind.
+- `../bot-cop-traffic-prober/docs/monitoring-prober-design.md` — the full design.
+  §3 is the seam, §4 sites and heartbeats, §5 the contracts, §11 the package
+  changes this repo implements, §12 the migration sequence.
 - `tests/contracts/README.md` and `tests/contracts/docs/` — the conformance kit:
-  schemas, examples, must-reject cases, HMAC vectors and rule fixtures. It is
-  the specification; the tests here consume it rather than restating it.
+  schemas, examples, must-reject cases, HMAC vectors, rule fixtures, and the
+  decisions taken while writing them.
 
+Do not re-open decisions recorded there without saying so explicitly.
 
 ## The seam
 

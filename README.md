@@ -7,7 +7,8 @@ and a dashboard — fed either by its own scheduler or by a prober running outsi
 its infrastructure.
 
 > Status: feature complete and not yet installed anywhere. See
-> [docs/installation.md](docs/installation.md).
+> [docs/installation.md](docs/installation.md) to install it, and
+> [docs/HANDOFF.md](docs/HANDOFF.md) for what was decided and why.
 
 ## The shape of it
 
