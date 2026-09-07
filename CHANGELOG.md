@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.1.2
+
+**Fixed: responses to the prober were not signed.**
+
+Every endpoint is signed in both directions, and only the inbound half was.
+`GET /monitoring/manifest` returned a valid manifest with none of
+`X-Monitoring-Schema`, `X-Monitoring-Timestamp` or `X-Monitoring-Signature`, so
+a prober that verifies what it is given — as it must, since a manifest decides
+what it will request for the next hour — refused it and kept the manifest it
+already had.
+
+Signing now happens in the middleware that verifies inbound, so it covers the
+manifest and all three delivery responses rather than one endpoint at a time,
+and it signs the bytes as returned. Refusals stay unsigned: there is nothing to
+vouch for.
+
+The signer itself was never wrong. It agreed with the conformance kit's vectors
+the whole time, and nothing asserted that an endpoint ever called it — so the
+new tests assert on what the endpoints return rather than on the signer, which
+is the only way this class of bug is caught.
+
 ## v0.1.1
 
 **Fixed: the screens ignored `monitoring.middleware`.**

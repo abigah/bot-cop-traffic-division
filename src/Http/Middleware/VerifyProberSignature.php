@@ -29,6 +29,8 @@ class VerifyProberSignature
 
     public const PROBER_HEADER = 'X-Monitoring-Prober';
 
+    public const TENANT_HEADER = 'X-Monitoring-Tenant';
+
     public function handle(Request $request, Closure $next): Response
     {
         /*
@@ -86,7 +88,41 @@ class VerifyProberSignature
 
         $this->recordContact($request, $proberId);
 
-        return $next($request);
+        /*
+         | Signed both ways. A manifest decides what a prober will spend the
+         | next hour requesting, so an unsigned one is a way to point it at any
+         | URL it can reach — it refuses an unverified manifest rather than
+         | shrugging, and it is right to.
+         |
+         | Signed with the current secret. A prober holds current and previous
+         | and accepts either, which is what makes a rotation gapless.
+         */
+        return $this->sign($next($request), $secrets[0]);
+    }
+
+    /**
+     * Sign what is being sent back, over the exact bytes being sent.
+     *
+     * Read the content, sign that, return it untouched. Anything that
+     * re-encodes between signing and sending — a formatter, a re-serialised
+     * JsonResponse — produces a signature over bytes the prober never sees, and
+     * the failure looks like a wrong secret rather than a wrong body.
+     */
+    protected function sign(Response $response, string $secret): Response
+    {
+        $timestamp = Carbon::now()->getTimestamp();
+
+        $response->headers->set(self::SCHEMA_HEADER, (string) Monitoring::schemaVersion());
+        $response->headers->set(self::TIMESTAMP_HEADER, (string) $timestamp);
+        $response->headers->set(
+            self::SIGNATURE_HEADER,
+            Signature::header($secret, $timestamp, (string) $response->getContent()),
+        );
+
+        // Optional, and useful: it says which tenant answered.
+        $response->headers->set(self::TENANT_HEADER, (string) config('monitoring.tenant'));
+
+        return $response;
     }
 
     /**
