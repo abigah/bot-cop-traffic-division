@@ -17,12 +17,21 @@ processes:
     auto_restart: false
     restart_when_changed: []
     env: {}
+  # Pest 4 has no --watch: the plugin that provided it stops at Pest 3. Solo
+  # does the watching instead, re-running the suite when anything it covers
+  # changes.
   Tests (watch):
-    command: vendor/bin/pest --watch
+    command: vendor/bin/pest
     working_dir: null
     auto_start: false
     auto_restart: false
-    restart_when_changed: []
+    restart_when_changed:
+      - src/**/*.php
+      - tests/**/*.php
+      - config/*.php
+      - routes/*.php
+      - database/**/*.php
+      - resources/views/**/*.blade.php
     env: {}
   Lint:
     command: vendor/bin/pint --test
