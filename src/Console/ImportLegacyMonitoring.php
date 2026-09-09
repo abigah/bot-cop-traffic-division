@@ -5,6 +5,8 @@ namespace Abigah\BotCopTrafficDivision\Console;
 use Abigah\BotCopTrafficDivision\Models\Monitor;
 use Abigah\BotCopTrafficDivision\Models\MonitorCheck;
 use Abigah\BotCopTrafficDivision\Models\MonitorCheckAggregate;
+use Abigah\BotCopTrafficDivision\Models\MonitorDnsLookup;
+use Abigah\BotCopTrafficDivision\Models\MonitorForgeSite;
 use Abigah\BotCopTrafficDivision\Models\MonitorIncident;
 use Abigah\BotCopTrafficDivision\Models\MonitorNotificationPreference;
 use Abigah\BotCopTrafficDivision\Support\SiteMatcher;
@@ -91,11 +93,14 @@ class ImportLegacyMonitoring extends Command
         $checks = $this->importChecks($source);
         $aggregates = $this->importAggregates($source);
         $preferences = $this->importPreferences($source);
+        $dnsLookups = $this->importDnsLookups($source);
+        $forgeSites = $this->importForgeSites($source);
 
         $this->newLine();
         $this->info(($this->option('dry-run') ? 'Would import: ' : 'Imported: ')
             .count($this->monitorMap).' monitors, '
-            ."{$incidents} incidents, {$checks} checks, {$aggregates} aggregates, {$preferences} preferences.");
+            ."{$incidents} incidents, {$checks} checks, {$aggregates} aggregates, "
+            ."{$preferences} preferences, {$dnsLookups} DNS lookups, {$forgeSites} Forge sites.");
 
         if ($unattached !== []) {
             $this->newLine();
@@ -295,6 +300,116 @@ class ImportLegacyMonitoring extends Command
         return $imported;
     }
 
+    /**
+     * DNS snapshots.
+     *
+     * Worth carrying because nothing recreates them. They are not derived and
+     * never were — a lookup is taken on demand and kept, so a row is the record
+     * of what DNS said on a particular day. A stale one is not useless; it is
+     * the only evidence that anything was ever different.
+     *
+     * Keyed including `looked_up_at`, because the point of the table is the
+     * history: keying on monitor and domain alone would collapse every snapshot
+     * a domain ever had into its most recent one.
+     */
+    protected function importDnsLookups(Connection $source): int
+    {
+        if (! $this->sourceHas($source, 'dns_lookups')) {
+            return 0;
+        }
+
+        $imported = 0;
+
+        foreach ($this->chunkedSource($source, 'dns_lookups', 'looked_up_at') as $rows) {
+            foreach ($rows as $row) {
+                $monitorId = $this->monitorMap[$row->monitor_id] ?? null;
+
+                if ($monitorId === null) {
+                    continue;
+                }
+
+                $imported++;
+
+                if ($this->option('dry-run')) {
+                    continue;
+                }
+
+                MonitorDnsLookup::updateOrCreate(
+                    [
+                        'monitor_id' => $monitorId,
+                        'domain' => $row->domain,
+                        'looked_up_at' => $row->looked_up_at,
+                    ],
+                    [
+                        // Decoded first: the column casts to array, and handing
+                        // it the source's JSON string stores that string
+                        // re-encoded rather than the records themselves.
+                        'records' => is_string($row->records)
+                            ? json_decode($row->records, true)
+                            : $row->records,
+                    ],
+                );
+            }
+        }
+
+        $this->reportPass('dns lookups', $imported, $this->sourceCount($source, 'dns_lookups'));
+
+        return $imported;
+    }
+
+    /**
+     * Forge links.
+     *
+     * Nothing regenerates one: it is a decision somebody made about which Forge
+     * site a monitor covers, not an observation. Left behind, it has to be made
+     * again by hand.
+     *
+     * They import whether or not this application has a Forge integration
+     * configured — the panel that shows them renders nothing without one, but
+     * the link belongs to the monitor either way, and configuring Forge later
+     * should not mean rebuilding what was already known.
+     */
+    protected function importForgeSites(Connection $source): int
+    {
+        if (! $this->sourceHas($source, 'forge_sites')) {
+            return 0;
+        }
+
+        $imported = 0;
+
+        foreach ($this->chunkedSource($source, 'forge_sites', 'id') as $rows) {
+            foreach ($rows as $row) {
+                $monitorId = $this->monitorMap[$row->monitor_id] ?? null;
+
+                if ($monitorId === null) {
+                    continue;
+                }
+
+                $imported++;
+
+                if ($this->option('dry-run')) {
+                    continue;
+                }
+
+                MonitorForgeSite::updateOrCreate(
+                    [
+                        'monitor_id' => $monitorId,
+                        'forge_server_id' => $row->forge_server_id,
+                        'forge_site_id' => $row->forge_site_id,
+                    ],
+                    [
+                        'server_name' => $row->server_name,
+                        'site_name' => $row->site_name,
+                    ],
+                );
+            }
+        }
+
+        $this->reportPass('forge sites', $imported, $this->sourceCount($source, 'forge_sites'));
+
+        return $imported;
+    }
+
     protected function importAggregates(Connection $source): int
     {
         $imported = 0;
@@ -444,6 +559,26 @@ class ImportLegacyMonitoring extends Command
 
             yield $rows;
         } while ($rows->count() === $size);
+    }
+
+    /**
+     * Whether the source has this table at all.
+     *
+     * Not every installation this reads from has every table: an application
+     * that never used the Forge integration has no `forge_sites`, and one that
+     * came from a different package may have neither. A missing table is an
+     * absence rather than a fault, so the pass says so once and moves on
+     * instead of failing an import that is otherwise fine.
+     */
+    protected function sourceHas(Connection $source, string $table): bool
+    {
+        if ($source->getSchemaBuilder()->hasTable($table)) {
+            return true;
+        }
+
+        $this->line("  {$table}: not present in the source, skipped");
+
+        return false;
     }
 
     /**

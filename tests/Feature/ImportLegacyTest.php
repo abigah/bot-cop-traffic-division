@@ -3,7 +3,9 @@
 use Abigah\BotCopTrafficDivision\Models\Monitor;
 use Abigah\BotCopTrafficDivision\Models\MonitorCheck;
 use Abigah\BotCopTrafficDivision\Models\MonitorCheckAggregate;
+use Abigah\BotCopTrafficDivision\Models\MonitorDnsLookup;
 use Abigah\BotCopTrafficDivision\Models\MonitoredSite;
+use Abigah\BotCopTrafficDivision\Models\MonitorForgeSite;
 use Abigah\BotCopTrafficDivision\Models\MonitorIncident;
 use Abigah\BotCopTrafficDivision\Models\MonitorNotificationPreference;
 use Illuminate\Support\Facades\DB;
@@ -92,6 +94,24 @@ beforeEach(function () {
         $table->unsignedInteger('down_checks')->default(0);
     });
 
+    $builder->create('dns_lookups', function ($table) {
+        $table->id();
+        $table->unsignedInteger('monitor_id');
+        $table->string('domain');
+        $table->json('records');
+        $table->timestamp('looked_up_at');
+    });
+
+    $builder->create('forge_sites', function ($table) {
+        $table->id();
+        $table->unsignedInteger('monitor_id');
+        $table->unsignedBigInteger('forge_server_id');
+        $table->unsignedBigInteger('forge_site_id');
+        $table->string('server_name');
+        $table->string('site_name');
+        $table->timestamps();
+    });
+
     $builder->create('monitor_notification_preferences', function ($table) {
         $table->id();
         $table->unsignedBigInteger('user_id');
@@ -136,6 +156,18 @@ beforeEach(function () {
 
     $legacy->table('monitor_check_aggregates')->insert([
         ['monitor_id' => 4, 'bucket_type' => 'daily', 'bucket_start' => now()->subDays(30)->startOfDay(), 'avg_response_time_ms' => 205, 'min_response_time_ms' => 100, 'max_response_time_ms' => 900, 'total_checks' => 288, 'up_checks' => 287, 'down_checks' => 1],
+    ]);
+
+    $legacy->table('dns_lookups')->insert([
+        ['monitor_id' => 4, 'domain' => 'acme.test', 'records' => json_encode([['type' => 'A', 'name' => 'acme.test', 'value' => '10.0.0.1', 'ttl' => 300]]), 'looked_up_at' => now()->subDays(2)],
+        ['monitor_id' => 4, 'domain' => 'acme.test', 'records' => json_encode([['type' => 'A', 'name' => 'acme.test', 'value' => '10.0.0.9', 'ttl' => 300]]), 'looked_up_at' => now()->subDay()],
+        ['monitor_id' => 900, 'domain' => 'someone-else.test', 'records' => json_encode([]), 'looked_up_at' => now()],
+    ]);
+
+    $legacy->table('forge_sites')->insert([
+        ['monitor_id' => 4, 'forge_server_id' => 7, 'forge_site_id' => 42, 'server_name' => 'web-1', 'site_name' => 'acme.test'],
+        ['monitor_id' => 62, 'forge_server_id' => 7, 'forge_site_id' => 43, 'server_name' => 'web-1', 'site_name' => 'health'],
+        ['monitor_id' => 900, 'forge_server_id' => 9, 'forge_site_id' => 99, 'server_name' => 'web-9', 'site_name' => 'someone-else.test'],
     ]);
 
     $legacy->table('monitor_notification_preferences')->insert([
@@ -343,4 +375,87 @@ it('reports what the source held, not only what it took', function () {
         ->expectsOutputToContain('incidents: 2 of 2')
         ->expectsOutputToContain('aggregates: 1 of 1')
         ->assertSuccessful();
+});
+
+/**
+ * Nothing regenerates a Forge link — it is a decision somebody made about which
+ * Forge site a monitor covers, not an observation — so leaving it behind means
+ * making it again by hand.
+ */
+it('brings Forge links across', function () {
+    $this->artisan('monitoring:import:legacy', ['--connection' => 'legacy', '--owner' => [3]])
+        ->assertSuccessful();
+
+    expect(MonitorForgeSite::count())->toBe(2);
+
+    $link = MonitorForgeSite::first();
+
+    expect($link->server_name)->toBe('web-1')
+        ->and($link->forge_site_id)->toBe(42)
+        ->and($link->monitor->url)->toBe('https://acme.test');
+});
+
+/**
+ * DNS snapshots are a history, not a derived value: nothing in the hub
+ * recreates them, and a row is the record of what DNS said on a given day.
+ * Keying on monitor and domain alone would collapse every snapshot into the
+ * most recent one.
+ */
+it('brings every DNS snapshot across, not just the latest per domain', function () {
+    $this->artisan('monitoring:import:legacy', ['--connection' => 'legacy', '--owner' => [3]])
+        ->assertSuccessful();
+
+    expect(MonitorDnsLookup::count())->toBe(2);
+
+    $records = MonitorDnsLookup::orderBy('looked_up_at')->get();
+
+    expect($records->first()->records[0]['value'])->toBe('10.0.0.1')
+        ->and($records->last()->records[0]['value'])->toBe('10.0.0.9');
+});
+
+it('leaves both tables untouched for a monitor filtered out by --owner', function () {
+    $this->artisan('monitoring:import:legacy', ['--connection' => 'legacy', '--owner' => [3]])
+        ->assertSuccessful();
+
+    // Owner 5's monitor has one of each in the source and neither belongs here.
+    expect(MonitorForgeSite::count())->toBe(2)
+        ->and(MonitorDnsLookup::count())->toBe(2)
+        ->and(MonitorForgeSite::where('forge_site_id', 99)->exists())->toBeFalse()
+        ->and(MonitorDnsLookup::where('domain', 'someone-else.test')->exists())->toBeFalse();
+});
+
+it('adds nothing on a second run of either table', function () {
+    $run = fn () => $this->artisan('monitoring:import:legacy', ['--connection' => 'legacy', '--owner' => [3]])
+        ->assertSuccessful();
+
+    $run();
+    $run();
+
+    expect(MonitorForgeSite::count())->toBe(2)
+        ->and(MonitorDnsLookup::count())->toBe(2);
+});
+
+it('reports both passes against the source count', function () {
+    $this->artisan('monitoring:import:legacy', ['--connection' => 'legacy', '--owner' => [3]])
+        ->expectsOutputToContain('dns lookups: 2 of 2')
+        ->expectsOutputToContain('forge sites: 2 of 2')
+        ->assertSuccessful();
+});
+
+/**
+ * Not every source has every table — an application that never used the Forge
+ * integration has no `forge_sites`, and one that came from a different package
+ * may have neither. That is an absence, not a fault.
+ */
+it('skips a table the source does not have rather than failing the import', function () {
+    Schema::connection('legacy')->drop('forge_sites');
+    Schema::connection('legacy')->drop('dns_lookups');
+
+    $this->artisan('monitoring:import:legacy', ['--connection' => 'legacy', '--owner' => [3]])
+        ->expectsOutputToContain('forge_sites: not present in the source, skipped')
+        ->assertSuccessful();
+
+    // Everything else still arrived.
+    expect(Monitor::count())->toBe(3)
+        ->and(MonitorForgeSite::count())->toBe(0);
 });

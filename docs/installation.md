@@ -172,7 +172,20 @@ writes to the source.
 | `--owner` | Only import monitors with these legacy `owner_id` values. Repeatable. |
 | `--as-owner` | Write this `owner_id` instead of the legacy one. |
 | `--checks-days` | How much raw check history to bring. Default 30; the aggregates carry the rest. |
+| `--chunk` | Rows read per query. Default 1000. |
 | `--dry-run` | Report what would happen and write nothing. |
+
+Each pass reports `imported of available`, counted over the monitors in scope,
+and warns when the two differ. A table the source does not have is reported as
+absent and skipped, so an application that never used the Forge integration
+imports everything else without complaint.
+
+**Forge links import whether or not Forge is configured here.** The panel that
+displays them renders nothing until `monitoring.forge_provider` is set, so on
+most installations these rows arrive and are not shown. That is deliberate: a
+Forge link is a decision somebody made about which Forge site a monitor covers,
+nothing regenerates it, and configuring Forge later should not mean rebuilding
+what was already known.
 
 Everything imported arrives **critical**, because the old model had no such flag
 and every monitor was equally load-bearing. Narrowing what "the site is down"

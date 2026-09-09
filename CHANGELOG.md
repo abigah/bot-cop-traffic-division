@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.1.4
+
+**Added: `monitoring:import:legacy` carries DNS lookups and Forge links.**
+
+Two tables the hub has homes for were left behind entirely. Both now import,
+keyset-paged like the rest, idempotent, and reported as `imported of available`.
+
+Both were worth carrying for the same reason: nothing recreates either. A Forge
+link is a decision about which Forge site a monitor covers, not an observation.
+A DNS row records what DNS said on a particular day — and contrary to the
+assumption in the report, the hub does not re-derive lookups. It has the table,
+the model and the service, and nothing that writes to them; the on-demand button
+that produced them in the package this was extracted from has not been rebuilt
+here. Skipping the import would have lost the only copy.
+
+DNS rows key on `(monitor_id, domain, looked_up_at)` rather than
+`(monitor_id, domain)`, which would have collapsed every snapshot a domain ever
+had into its most recent one.
+
+A table the source does not have is now reported as absent and skipped rather
+than failing the import, so a source that never used Forge imports the rest.
+
+`--chunk` sets the page size.
+
 ## v0.1.3
 
 **Fixed: a paused monitor still alerted.**
