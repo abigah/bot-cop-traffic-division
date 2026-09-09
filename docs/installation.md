@@ -171,12 +171,23 @@ writes to the source.
 | `--connection` | The connection holding the old tables. Configure it in `config/database.php`; it is only ever read. |
 | `--owner` | Only import monitors with these legacy `owner_id` values. Repeatable. |
 | `--as-owner` | Write this `owner_id` instead of the legacy one. |
-| `--checks-days` | How much raw check history to bring. Default 30; the aggregates carry the rest. |
+| `--checks-days` | Days of raw checks to bring. Default 30. |
 | `--chunk` | Rows read per query. Default 1000. |
 | `--dry-run` | Report what would happen and write nothing. |
 
 Each pass reports `imported of available`, counted over the monitors in scope,
-and warns when the two differ. A table the source does not have is reported as
+and **the command exits non-zero when the two differ**. Re-running is safe, and a
+clean import reports equal counts; an importer that cannot prove it was complete
+is one bug away from being silently wrong, which is what happened before the
+paging was fixed — a run reported success while dropping around nine per cent of
+a client's aggregate history.
+
+**`--checks-days` does not preserve raw history.** The hourly rollup aggregates
+raw checks older than two hours and deletes them, so importing thirty days of
+raw checks gets thirty days of rows that the next scheduled run folds into
+hourly buckets. Nothing is lost — the aggregates carry that history and import
+too — but the raw table settling back to a couple of hours' worth is expected
+rather than a fault. A table the source does not have is reported as
 absent and skipped, so an application that never used the Forge integration
 imports everything else without complaint.
 
@@ -203,6 +214,33 @@ php artisan tinker --execute="Abigah\BotCopTrafficDivision\Models\Monitor::first
 
 Two consecutive failures is the default threshold, so run that twice to see an
 incident open and a notification go out.
+
+## Pausing a monitor
+
+Clearing `uptime_check_enabled` stops the alerting **immediately** and stops the
+checking at the prober's **next reconcile** — up to the reconcile interval later,
+which on a live install has been around eighteen minutes.
+
+The two are separate because a prober works from a plan built when it last
+pulled a manifest, and keeps delivering results for anything paused since. Those
+results are recorded, because they are real and a prober went to the trouble of
+gathering them, and nothing is concluded from them: no status change, no
+incident, nobody woken. Unpausing resumes judging on the next result.
+
+Before v0.1.3 the gap between those two was live: a paused monitor kept alerting
+until the prober caught up.
+
+## DNS lookups
+
+The package carries a `monitor_dns_lookups` table, a `DnsLookupService` and the
+relation between them, and **nothing currently writes to it**. In the package
+this was extracted from, a lookup was taken on demand from a button on the
+monitor screen and kept as history; that button has not been rebuilt here.
+
+So the table is a home with nothing yet putting anything in it. Lookups are not
+derived and never were — a row records what DNS said on a particular day — which
+is why `monitoring:import:legacy` carries existing rows across rather than
+discarding them as stale. Nothing recreates them.
 
 ## The screens
 

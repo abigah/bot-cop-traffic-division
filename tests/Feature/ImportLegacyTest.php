@@ -1,5 +1,6 @@
 <?php
 
+use Abigah\BotCopTrafficDivision\Console\ImportLegacyMonitoring;
 use Abigah\BotCopTrafficDivision\Models\Monitor;
 use Abigah\BotCopTrafficDivision\Models\MonitorCheck;
 use Abigah\BotCopTrafficDivision\Models\MonitorCheckAggregate;
@@ -458,4 +459,35 @@ it('skips a table the source does not have rather than failing the import', func
     // Everything else still arrived.
     expect(Monitor::count())->toBe(3)
         ->and(MonitorForgeSite::count())->toBe(0);
+});
+
+/**
+ * A correct importer that cannot prove it was correct is one bug away from
+ * being silently wrong. The paging bug reported success while dropping around
+ * nine per cent of a client's aggregate history, so a shortfall now fails the
+ * command rather than printing a warning a script will not read.
+ *
+ * The guard exists to catch a pass that under-delivers, so the test makes one
+ * under-deliver: this stand-in drops a row from every chunk it reads, which is
+ * exactly the shape of the bug it is guarding against.
+ */
+it('fails when a pass takes fewer rows than the source held', function () {
+    $this->app->extend(ImportLegacyMonitoring::class, fn () => new class extends ImportLegacyMonitoring
+    {
+        protected function chunkedSource($source, string $table, string $orderBy, $since = null): Generator
+        {
+            foreach (parent::chunkedSource($source, $table, $orderBy, $since) as $rows) {
+                yield $rows->skip(1)->values();
+            }
+        }
+    });
+
+    $this->artisan('monitoring:import:legacy', ['--connection' => 'legacy', '--owner' => [3]])
+        ->expectsOutputToContain('did not arrive')
+        ->assertFailed();
+});
+
+it('succeeds when every pass reconciles', function () {
+    $this->artisan('monitoring:import:legacy', ['--connection' => 'legacy', '--owner' => [3]])
+        ->assertSuccessful();
 });

@@ -38,7 +38,7 @@ class ImportLegacyMonitoring extends Command
         {--connection= : The database connection holding the old tables}
         {--owner=* : Only import monitors with these legacy owner_id values}
         {--as-owner= : Write this owner_id instead of the legacy one}
-        {--checks-days=30 : How many days of raw check history to bring (aggregates carry the rest)}
+        {--checks-days=30 : Days of raw checks to bring. The hourly rollup keeps only the last two hours of raw checks, so anything older is aggregated and swept on its next run — the aggregates are what survive}
         {--chunk=1000 : Rows to read per query. Lower it on a small box, or to exercise the paging}
         {--dry-run : Report what would be imported without writing anything}';
 
@@ -48,6 +48,16 @@ class ImportLegacyMonitoring extends Command
 
     /** @var array<int, int> legacy monitor id => new monitor id */
     protected array $monitorMap = [];
+
+    /**
+     * Rows the source held and this did not take.
+     *
+     * A non-zero count fails the command. An importer that cannot prove it was
+     * complete is one bug away from being silently wrong again, and the last
+     * time that happened it reported success while dropping nine per cent of a
+     * client's history.
+     */
+    protected int $shortfall = 0;
 
     public function handle(SiteMatcher $matcher): int
     {
@@ -102,6 +112,16 @@ class ImportLegacyMonitoring extends Command
             ."{$incidents} incidents, {$checks} checks, {$aggregates} aggregates, "
             ."{$preferences} preferences, {$dnsLookups} DNS lookups, {$forgeSites} Forge sites.");
 
+        if ($this->shortfall > 0) {
+            $this->newLine();
+            $this->error(sprintf(
+                '%d source %s did not arrive. Re-running is safe and should report equal counts; '
+                .'if it does not, something is dropping rows and the numbers above say where.',
+                $this->shortfall,
+                str('row')->plural($this->shortfall),
+            ));
+        }
+
         if ($unattached !== []) {
             $this->newLine();
             $this->warn(count($unattached).' monitor(s) had no site and were skipped:');
@@ -113,7 +133,7 @@ class ImportLegacyMonitoring extends Command
             $this->line('Wire Monitoring::resolveSiteForMonitorUsing() to place them, then run this again.');
         }
 
-        return self::SUCCESS;
+        return $this->shortfall > 0 ? self::FAILURE : self::SUCCESS;
     }
 
     /** @return Collection<int, object> */
@@ -245,7 +265,23 @@ class ImportLegacyMonitoring extends Command
         $cutoff = Carbon::now()->subDays($days);
         $imported = 0;
 
+        /*
+         | Said at the moment it would otherwise mislead. The hourly rollup
+         | aggregates raw checks older than two hours and deletes them, so
+         | asking for thirty days of raw history gets thirty days of rows that
+         | the next scheduled run folds into buckets. The history is not lost —
+         | the aggregates carry it, and those import too — but "680 imported,
+         | 295 an hour later" reads like a fault unless you knew.
+         */
+        if ($days > 1 && ! $this->option('dry-run')) {
+            $this->line(sprintf(
+                '  note: raw checks older than the rollup window (2h) are aggregated and swept on its next run.'
+            ));
+        }
+
         foreach ($this->chunkedSource($source, 'monitor_checks', 'checked_at', $cutoff) as $rows) {
+            $pending = [];
+
             foreach ($rows as $row) {
                 $monitorId = $this->monitorMap[$row->monitor_id] ?? null;
 
@@ -261,19 +297,7 @@ class ImportLegacyMonitoring extends Command
 
                 $checkedAt = Carbon::parse($row->checked_at);
 
-                // Already here from an earlier run. check_id is this table's
-                // idempotency key, and an imported row has no natural one, so
-                // the pair that identifies a check is what is matched on.
-                $exists = MonitorCheck::query()
-                    ->where('monitor_id', $monitorId)
-                    ->where('checked_at', $checkedAt)
-                    ->exists();
-
-                if ($exists) {
-                    continue;
-                }
-
-                MonitorCheck::create([
+                $pending[] = [
                     /*
                      | Minted from the moment the check was taken, not from now,
                      | so imported history sorts alongside everything that comes
@@ -286,8 +310,12 @@ class ImportLegacyMonitoring extends Command
                     'response_time_ms' => $row->response_time_ms,
                     'failure_reason' => $row->failure_reason,
                     'checked_at' => $checkedAt,
-                ]);
+                    'served_from_cache' => false,
+                    'disagreed' => false,
+                ];
             }
+
+            $this->insertNewChecks($pending);
         }
 
         $this->reportPass(
@@ -410,11 +438,55 @@ class ImportLegacyMonitoring extends Command
         return $imported;
     }
 
+    /**
+     * Insert a chunk's worth of checks, skipping any already here.
+     *
+     * Two queries per chunk rather than one per row. The previous shape asked
+     * the database whether each row existed, one row at a time, which over a
+     * link to another region meant about four rows a second — 75 minutes for a
+     * modest history, and the documented path for an extranet whose legacy
+     * database is not co-located is exactly that one.
+     *
+     * `check_id` is this table's idempotency key and an imported row has no
+     * natural one, so the pair that identifies a check is what is matched on.
+     *
+     * @param  array<int, array<string, mixed>>  $pending
+     */
+    protected function insertNewChecks(array $pending): void
+    {
+        if ($pending === []) {
+            return;
+        }
+
+        $monitorIds = array_unique(array_column($pending, 'monitor_id'));
+        $timestamps = array_map(fn (array $row) => $row['checked_at'], $pending);
+
+        // One lookup for the whole chunk, narrowed by the range it covers so a
+        // large existing history is not scanned.
+        $existing = MonitorCheck::query()
+            ->whereIn('monitor_id', $monitorIds)
+            ->whereBetween('checked_at', [min($timestamps), max($timestamps)])
+            ->get(['monitor_id', 'checked_at'])
+            ->map(fn ($check) => $check->monitor_id.'@'.$check->checked_at->toDateTimeString())
+            ->flip();
+
+        $fresh = array_values(array_filter(
+            $pending,
+            fn (array $row) => ! $existing->has($row['monitor_id'].'@'.$row['checked_at']->toDateTimeString()),
+        ));
+
+        foreach (array_chunk($fresh, 500) as $batch) {
+            MonitorCheck::insert($batch);
+        }
+    }
+
     protected function importAggregates(Connection $source): int
     {
         $imported = 0;
 
         foreach ($this->chunkedSource($source, 'monitor_check_aggregates', 'bucket_start') as $rows) {
+            $pending = [];
+
             foreach ($rows as $row) {
                 $monitorId = $this->monitorMap[$row->monitor_id] ?? null;
 
@@ -428,20 +500,30 @@ class ImportLegacyMonitoring extends Command
                     continue;
                 }
 
-                MonitorCheckAggregate::updateOrCreate(
-                    [
-                        'monitor_id' => $monitorId,
-                        'bucket_type' => $row->bucket_type,
-                        'bucket_start' => $row->bucket_start,
-                    ],
-                    [
-                        'avg_response_time_ms' => $row->avg_response_time_ms,
-                        'min_response_time_ms' => $row->min_response_time_ms,
-                        'max_response_time_ms' => $row->max_response_time_ms,
-                        'total_checks' => $row->total_checks,
-                        'up_checks' => $row->up_checks,
-                        'down_checks' => $row->down_checks,
-                    ],
+                $pending[] = [
+                    'monitor_id' => $monitorId,
+                    'bucket_type' => $row->bucket_type,
+                    'bucket_start' => $row->bucket_start,
+                    'avg_response_time_ms' => $row->avg_response_time_ms,
+                    'min_response_time_ms' => $row->min_response_time_ms,
+                    'max_response_time_ms' => $row->max_response_time_ms,
+                    'total_checks' => $row->total_checks,
+                    'up_checks' => $row->up_checks,
+                    'down_checks' => $row->down_checks,
+                ];
+            }
+
+            /*
+             | One statement per chunk against the table's own unique key, in
+             | place of a read and a write per row. This is the pass that
+             | carries the volume — nine thousand rows on the first real import
+             | — and the one where a round trip per row is felt.
+             */
+            foreach (array_chunk($pending, 500) as $batch) {
+                MonitorCheckAggregate::upsert(
+                    $batch,
+                    ['monitor_id', 'bucket_type', 'bucket_start'],
+                    ['avg_response_time_ms', 'min_response_time_ms', 'max_response_time_ms', 'total_checks', 'up_checks', 'down_checks'],
                 );
             }
         }
@@ -615,14 +697,17 @@ class ImportLegacyMonitoring extends Command
     {
         $this->line(sprintf('  %s: %d of %d%s', $label, $imported, $available, $note));
 
-        if ($imported < $available) {
-            $missing = $available - $imported;
-
-            $this->warn(sprintf(
-                '    %d source %s did not arrive. Re-run; a clean import reports equal counts.',
-                $missing,
-                str('row')->plural($missing),
-            ));
+        if ($imported >= $available) {
+            return;
         }
+
+        $missing = $available - $imported;
+        $this->shortfall += $missing;
+
+        $this->warn(sprintf(
+            '    %d source %s did not arrive.',
+            $missing,
+            str('row')->plural($missing),
+        ));
     }
 }

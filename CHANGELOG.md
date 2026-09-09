@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.1.5
+
+**Changed: a shortfall now fails the import.**
+
+Each pass already reported `imported of available`; a mismatch was a warning.
+It is now a non-zero exit, because the failure this guards against is silent by
+nature — the paging bug reported success while dropping around nine per cent of
+a client's aggregate history, and a warning is not something a deploy script
+reads.
+
+**Changed: the import is no longer a query per row.**
+
+Checks looked up each row's existence individually and aggregates wrote one at a
+time. Over a link to another region that meant roughly four rows a second, and
+75 minutes for a modest history. Checks now do one lookup and one batched insert
+per chunk; aggregates upsert per chunk against their own unique key.
+
+**Documented: `--checks-days` does not preserve raw history.**
+
+The hourly rollup aggregates raw checks older than two hours and deletes them,
+so importing thirty days of raw checks gets thirty days of rows the next
+scheduled run folds into buckets. Nothing is lost — the aggregates carry that
+history — but the raw table settling back to a couple of hours' worth reads like
+a fault unless you knew. Said at the option, in the guide, and once at run time.
+
+**Documented: pausing, and the DNS table with no writer.**
+
+Both sections were written for v0.1.3 and v0.1.4 and neither reached the file:
+the edits silently matched nothing. They are there now.
+
 ## v0.1.4
 
 **Added: `monitoring:import:legacy` carries DNS lookups and Forge links.**
