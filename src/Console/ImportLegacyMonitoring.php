@@ -37,6 +37,7 @@ class ImportLegacyMonitoring extends Command
         {--owner=* : Only import monitors with these legacy owner_id values}
         {--as-owner= : Write this owner_id instead of the legacy one}
         {--checks-days=30 : How many days of raw check history to bring (aggregates carry the rest)}
+        {--chunk=1000 : Rows to read per query. Lower it on a small box, or to exercise the paging}
         {--dry-run : Report what would be imported without writing anything}';
 
     protected $description = 'Import monitors, history and incidents from a pre-sites monitoring install';
@@ -228,7 +229,7 @@ class ImportLegacyMonitoring extends Command
             }
         }
 
-        $this->line("  incidents: {$imported}");
+        $this->reportPass('incidents', $imported, $this->sourceCount($source, 'monitor_incidents'));
 
         return $imported;
     }
@@ -284,7 +285,12 @@ class ImportLegacyMonitoring extends Command
             }
         }
 
-        $this->line("  checks: {$imported} (last {$days} days)");
+        $this->reportPass(
+            'checks',
+            $imported,
+            $this->sourceCount($source, 'monitor_checks', 'checked_at', $cutoff),
+            " (last {$days} days)",
+        );
 
         return $imported;
     }
@@ -325,7 +331,7 @@ class ImportLegacyMonitoring extends Command
             }
         }
 
-        $this->line("  aggregates: {$imported}");
+        $this->reportPass('aggregates', $imported, $this->sourceCount($source, 'monitor_check_aggregates'));
 
         return $imported;
     }
@@ -370,7 +376,7 @@ class ImportLegacyMonitoring extends Command
             }
         }
 
-        $this->line("  preferences: {$imported}");
+        $this->reportPass('preferences', $imported, $this->sourceCount($source, 'monitor_notification_preferences'));
 
         return $imported;
     }
@@ -379,6 +385,13 @@ class ImportLegacyMonitoring extends Command
      * Read the source in chunks, restricted to the monitors being imported. A
      * client's history can be millions of rows and none of it needs to be in
      * memory at once.
+     *
+     * Keyset pagination on (sort column, id) rather than an offset. Every
+     * column this is called with ties heavily — an hourly `bucket_start`
+     * repeats once per monitor, so a 31-monitor import has 31 rows sharing each
+     * value — and OFFSET has no defined order between two pages when the sort
+     * key ties. A row can then land on both pages or on neither, and landing on
+     * neither is silent.
      *
      * @return \Generator<int, Collection<int, object>>
      */
@@ -392,22 +405,89 @@ class ImportLegacyMonitoring extends Command
             return;
         }
 
-        $query = $source->table($table)
-            ->whereIn('monitor_id', array_keys($this->monitorMap))
-            ->orderBy($orderBy);
+        $size = max(1, (int) $this->option('chunk'));
 
-        if ($since !== null) {
-            $query->where($orderBy, '>=', $since);
-        }
-
-        $page = 0;
+        $lastSort = null;
+        $lastId = null;
 
         do {
-            $rows = $query->forPage(++$page, 1000)->get();
+            $query = $source->table($table)
+                ->whereIn('monitor_id', array_keys($this->monitorMap))
+                ->orderBy($orderBy)
+                ->orderBy('id')
+                ->limit($size);
 
-            if ($rows->isNotEmpty()) {
-                yield $rows;
+            if ($since !== null) {
+                $query->where($orderBy, '>=', $since);
             }
-        } while ($rows->count() === 1000);
+
+            // Strictly after the last row of the previous page, with id
+            // breaking the tie the sort column cannot.
+            if ($lastSort !== null) {
+                $query->where(function ($query) use ($orderBy, $lastSort, $lastId) {
+                    $query->where($orderBy, '>', $lastSort)
+                        ->orWhere(function ($query) use ($orderBy, $lastSort, $lastId) {
+                            $query->where($orderBy, '=', $lastSort)->where('id', '>', $lastId);
+                        });
+                });
+            }
+
+            $rows = $query->get();
+
+            if ($rows->isEmpty()) {
+                return;
+            }
+
+            $last = $rows->last();
+            $lastSort = $last->{$orderBy};
+            $lastId = $last->id;
+
+            yield $rows;
+        } while ($rows->count() === $size);
+    }
+
+    /**
+     * How many rows the source holds for this pass, so a count that differs
+     * from what arrived can be reported rather than assumed equal.
+     */
+    protected function sourceCount(
+        Connection $source,
+        string $table,
+        ?string $sinceColumn = null,
+        ?Carbon $since = null,
+    ): int {
+        if ($this->monitorMap === []) {
+            return 0;
+        }
+
+        $query = $source->table($table)->whereIn('monitor_id', array_keys($this->monitorMap));
+
+        if ($since !== null && $sinceColumn !== null) {
+            $query->where($sinceColumn, '>=', $since);
+        }
+
+        return (int) $query->count();
+    }
+
+    /**
+     * Say what was there beside what arrived.
+     *
+     * The old summary reported what it had iterated, which is the one number
+     * guaranteed to agree with itself: an import that silently skipped four
+     * hundred rows still reported success.
+     */
+    protected function reportPass(string $label, int $imported, int $available, string $note = ''): void
+    {
+        $this->line(sprintf('  %s: %d of %d%s', $label, $imported, $available, $note));
+
+        if ($imported < $available) {
+            $missing = $available - $imported;
+
+            $this->warn(sprintf(
+                '    %d source %s did not arrive. Re-run; a clean import reports equal counts.',
+                $missing,
+                str('row')->plural($missing),
+            ));
+        }
     }
 }

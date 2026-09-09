@@ -259,6 +259,21 @@ class Monitor extends Model
             return $existing;
         }
 
+        /*
+         | Paused. The result is kept — a prober went to the trouble of
+         | gathering it and it is genuine — but nothing is concluded from it:
+         | no status change, no incident, nobody woken.
+         |
+         | The guard belongs here rather than at either checker, because a
+         | prober runs off a cached plan and keeps delivering for a monitor
+         | disabled after that plan was built. Pausing has to stop the alerting
+         | now, not at the next reconcile, or the button does not mean what it
+         | says.
+         */
+        if (! $this->uptime_check_enabled) {
+            return $this->recordWithoutJudging($result);
+        }
+
         if ($result->up) {
             $this->markUptimeUp($result->checkedAt);
         } else {
@@ -281,6 +296,21 @@ class Monitor extends Model
     }
 
     /**
+     * Keep the check and conclude nothing from it.
+     *
+     * Two situations reach this: a monitor nobody asked to be watched, and a
+     * failure another prober contradicted. In both the result is real and the
+     * conclusion is not this application's to draw.
+     */
+    protected function recordWithoutJudging(CheckResult $result, bool $disagreed = false): MonitorCheck
+    {
+        return $this->checks()->create([
+            ...$result->toCheckAttributes(),
+            'disagreed' => $disagreed,
+        ]);
+    }
+
+    /**
      * Keep a check that this application has decided not to believe.
      *
      * A failure only one prober saw, while another said up in the same window,
@@ -296,10 +326,7 @@ class Monitor extends Model
             return $existing;
         }
 
-        return $this->checks()->create([
-            ...$result->toCheckAttributes(),
-            'disagreed' => true,
-        ]);
+        return $this->recordWithoutJudging($result, disagreed: true);
     }
 
     protected function markUptimeUp(CarbonInterface $checkedAt): void

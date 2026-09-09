@@ -276,3 +276,71 @@ it('leaves the source untouched', function () {
 it('needs a connection to read from', function () {
     $this->artisan('monitoring:import:legacy')->assertFailed();
 });
+
+/**
+ * The pagination bug this exists to prevent.
+ *
+ * Every column the import pages by ties: an hourly bucket_start repeats once
+ * per monitor, so a 31-monitor import has 31 rows sharing each value. An OFFSET
+ * query has no defined order between pages when the sort key ties, so a row can
+ * land on both pages or on neither — and landing on neither was silent, because
+ * the summary counted what it had iterated, which always agrees with itself.
+ *
+ * Thirty monitors share one bucket_start here, read ten at a time, so the tie
+ * spans three page boundaries.
+ */
+it('imports every row when a sort value ties across page boundaries', function () {
+    $legacy = DB::connection('legacy');
+    $bucket = now()->subDays(20)->startOfHour();
+
+    $monitors = [];
+    $aggregates = [];
+
+    foreach (range(100, 129) as $id) {
+        $monitors[] = [
+            'id' => $id,
+            'owner_id' => 3,
+            'url' => "https://tied-{$id}.test",
+            'look_for_string' => '',
+            'uptime_check_enabled' => true,
+            'uptime_check_interval_in_minutes' => 5,
+            'uptime_status' => 'up',
+        ];
+
+        // Identical bucket_start on every row: only id can order them.
+        $aggregates[] = [
+            'monitor_id' => $id,
+            'bucket_type' => 'hourly',
+            'bucket_start' => $bucket,
+            'avg_response_time_ms' => 100,
+            'min_response_time_ms' => 50,
+            'max_response_time_ms' => 200,
+            'total_checks' => 12,
+            'up_checks' => 12,
+            'down_checks' => 0,
+        ];
+    }
+
+    $legacy->table('monitors')->insert($monitors);
+    $legacy->table('monitor_check_aggregates')->insert($aggregates);
+
+    $this->artisan('monitoring:import:legacy', [
+        '--connection' => 'legacy',
+        '--owner' => [3],
+        '--chunk' => 10,
+    ])->assertSuccessful();
+
+    // Thirty tied rows plus the one already in the fixture.
+    expect(MonitorCheckAggregate::count())->toBe(31);
+});
+
+/**
+ * The summary used to report what it had iterated, so an import that skipped
+ * rows still looked like a success. It now reports what the source held.
+ */
+it('reports what the source held, not only what it took', function () {
+    $this->artisan('monitoring:import:legacy', ['--connection' => 'legacy', '--owner' => [3]])
+        ->expectsOutputToContain('incidents: 2 of 2')
+        ->expectsOutputToContain('aggregates: 1 of 1')
+        ->assertSuccessful();
+});

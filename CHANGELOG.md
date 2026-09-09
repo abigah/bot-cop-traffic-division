@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.1.3
+
+**Fixed: a paused monitor still alerted.**
+
+`uptime_check_enabled` was honoured only by the prober, which drops disabled
+monitors when it plans work — but it plans from the last manifest it pulled, so
+it keeps delivering for anything paused since. `recordUptimeResult()` consulted
+nothing, so those results transitioned status, opened incidents and sent
+notifications. Found on a live install: 31 monitors imported, paused
+immediately, and their owner paged for the next half hour.
+
+The result is now recorded and nothing is concluded from it. The guard is at the
+seam, because local checks and delivered ones both pass through there and a
+guard anywhere else would cover one and not the other.
+
+**Fixed: `monitoring:import:legacy` could silently skip rows.**
+
+It paged with an offset ordered by a column that ties heavily — an hourly
+`bucket_start` repeats once per monitor — and OFFSET has no defined order
+between pages when the sort key ties, so rows could land on both pages or on
+neither. Duplicates were already absorbed; skips were silent, because the
+summary reported what it had iterated rather than what the source held.
+
+Now keyset-paginated on `(sort column, id)`, and each pass reports the source
+count beside the imported one and warns when they differ. A regression test
+covers a tie spanning three page boundaries: the old paging imported 20 of 31
+rows.
+
+`--chunk` sets the page size, for a small box or to exercise the paging.
+
 ## v0.1.2
 
 **Fixed: responses to the prober were not signed.**
