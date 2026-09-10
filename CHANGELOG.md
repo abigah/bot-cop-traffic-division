@@ -1,5 +1,33 @@
 # Changelog
 
+## v0.1.6
+
+**Fixed: response-time statistics counted failed checks.**
+
+`uptime` filtered on status; `avg`, `min` and `max` did not. A failed check
+still carries a duration and it is not a response time — a Cloudflare challenge
+refused at the edge comes back in two milliseconds, faster than any real page,
+and a timeout takes the whole timeout. So a blocked monitor read as a monitor at
+its best: twelve 403s at 2-22ms and three 429s at 422-940ms produced "Uptime 0%"
+beside "Average 123ms", with a 2ms rejection reported as the site's fastest
+response. All three columns, in `MonitorChartService` and in the chart series,
+now describe only the checks that answered.
+
+**Fixed: rolled-up averages were weighted by the wrong population.**
+
+A mean of means must weight by the population its parts describe. Both the daily
+rollup and `combinedStats` weighted `avg_response_time_ms` by `total_checks`,
+counting hours full of failures as though they had contributed response times.
+They now weight by `up_checks`.
+
+**Note for existing installs.** `monitor_check_aggregates` rows written before
+this change hold averages taken over every check, and the raw rows they came
+from have been pruned, so they cannot be recomputed. Buckets with no failures
+are unaffected — the two definitions agree there. Buckets that contain failures
+keep their old, lower numbers; new buckets do not. A bucket in which nothing
+answered now stores `null` for all three columns rather than a number, which the
+schema already allowed.
+
 ## v0.1.5
 
 **Changed: a shortfall now fails the import.**

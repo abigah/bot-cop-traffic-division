@@ -37,6 +37,24 @@ class MonitorChartService
     }
 
     /**
+     * Response time, but only where there was a response.
+     *
+     * A failed check still carries a duration and it is not a response time. A
+     * challenge refused at the edge comes back in two milliseconds; a timeout
+     * takes the whole timeout. Averaged in with real responses they report a
+     * site at its fastest in the moment it stopped answering, and put "Average
+     * 123ms" beside "Uptime 0%" — two numbers that cannot both be true.
+     *
+     * Uptime already says the check failed. These columns describe how the
+     * checks that succeeded performed, and a window with none of those has no
+     * answer to give rather than a misleading one.
+     */
+    protected function upResponseTime(string $column = 'response_time_ms'): string
+    {
+        return "CASE WHEN status = 'up' THEN {$column} END";
+    }
+
+    /**
      * Build chart data for the given period and monitors.
      *
      * @param  list<int>  $monitorIds
@@ -98,7 +116,7 @@ class MonitorChartService
         $rows = MonitorCheck::whereIn('monitor_id', $monitorIds)
             ->where('checked_at', '>=', $since)
             ->selectRaw($this->bucketExpression('checked_at', 'minute').' as bucket')
-            ->selectRaw('ROUND(AVG(response_time_ms)) as avg_ms')
+            ->selectRaw("ROUND(AVG({$this->upResponseTime()})) as avg_ms")
             ->selectRaw("SUM(CASE WHEN status = 'down' THEN 1 ELSE 0 END) as down_count")
             ->groupBy('bucket')
             ->orderBy('bucket')
@@ -159,7 +177,7 @@ class MonitorChartService
             ->whereIn('monitor_id', $monitorIds)
             ->where('checked_at', '>=', $since)
             ->selectRaw($this->bucketExpression('checked_at', 'hour').' as bucket')
-            ->selectRaw('ROUND(AVG(response_time_ms)) as avg_ms')
+            ->selectRaw("ROUND(AVG({$this->upResponseTime()})) as avg_ms")
             ->selectRaw("SUM(CASE WHEN status = 'down' THEN 1 ELSE 0 END) as down_count")
             ->groupBy('bucket')
             ->orderBy('bucket')
@@ -217,7 +235,7 @@ class MonitorChartService
             ->whereIn('monitor_id', $monitorIds)
             ->where('checked_at', '>=', $since)
             ->selectRaw($this->bucketExpression('checked_at', $granularity).' as bucket')
-            ->selectRaw('ROUND(AVG(response_time_ms)) as avg_ms')
+            ->selectRaw("ROUND(AVG({$this->upResponseTime()})) as avg_ms")
             ->selectRaw("SUM(CASE WHEN status = 'down' THEN 1 ELSE 0 END) as down_count")
             ->groupBy('bucket')
             ->orderBy('bucket')
@@ -262,9 +280,9 @@ class MonitorChartService
             ->selectRaw('COUNT(*) as total')
             ->selectRaw("SUM(CASE WHEN status = 'up' THEN 1 ELSE 0 END) as up")
             ->selectRaw("SUM(CASE WHEN status = 'down' THEN 1 ELSE 0 END) as down")
-            ->selectRaw('ROUND(AVG(response_time_ms)) as avg_ms')
-            ->selectRaw('MIN(response_time_ms) as min_ms')
-            ->selectRaw('MAX(response_time_ms) as max_ms')
+            ->selectRaw("ROUND(AVG({$this->upResponseTime()})) as avg_ms")
+            ->selectRaw("MIN({$this->upResponseTime()}) as min_ms")
+            ->selectRaw("MAX({$this->upResponseTime()}) as max_ms")
             ->first();
 
         $result = [
@@ -303,7 +321,7 @@ class MonitorChartService
             ->selectRaw('SUM(down_checks) as down')
             ->selectRaw('MIN(min_response_time_ms) as min_ms')
             ->selectRaw('MAX(max_response_time_ms) as max_ms')
-            ->selectRaw('SUM(avg_response_time_ms * total_checks) as weighted_sum')
+            ->selectRaw('SUM(avg_response_time_ms * up_checks) as weighted_sum')
             ->first();
 
         $rawStats = MonitorCheck::query()
@@ -312,9 +330,9 @@ class MonitorChartService
             ->selectRaw('COUNT(*) as total')
             ->selectRaw("SUM(CASE WHEN status = 'up' THEN 1 ELSE 0 END) as up")
             ->selectRaw("SUM(CASE WHEN status = 'down' THEN 1 ELSE 0 END) as down")
-            ->selectRaw('MIN(response_time_ms) as min_ms')
-            ->selectRaw('MAX(response_time_ms) as max_ms')
-            ->selectRaw('SUM(response_time_ms) as sum_ms')
+            ->selectRaw("MIN({$this->upResponseTime()}) as min_ms")
+            ->selectRaw("MAX({$this->upResponseTime()}) as max_ms")
+            ->selectRaw("SUM(COALESCE({$this->upResponseTime()}, 0)) as sum_ms")
             ->first();
 
         $totalChecks = ($aggStats->total ?? 0) + ($rawStats->total ?? 0);
@@ -333,7 +351,7 @@ class MonitorChartService
             'total' => $totalChecks,
             'up' => $totalUp,
             'down' => $totalDown,
-            'avg_ms' => $totalChecks > 0 ? (int) round($weightedSum / $totalChecks) : 0,
+            'avg_ms' => $totalUp > 0 ? (int) round($weightedSum / $totalUp) : 0,
             'min_ms' => $minMs === PHP_INT_MAX ? 0 : (int) $minMs,
             'max_ms' => (int) $maxMs,
         ];
