@@ -89,3 +89,31 @@ it('refuses to run when a host supplies a site model and no resolver', function 
     expect(fn () => $this->artisan('monitoring:sites:backfill')->run())
         ->toThrow(RuntimeException::class, 'resolveSiteForMonitorUsing');
 });
+
+/**
+ * Null is how a resolver declines a monitor, so a resolver that only matches
+ * sites the host already has is still a wired resolver — and it is only ever
+ * asked about real monitors.
+ */
+it('runs with a host site model whose resolver declines some monitors', function () {
+    config()->set('monitoring.site_model', HostSite::class);
+
+    $site = HostSite::create(['name' => 'acme.test']);
+    $asked = [];
+
+    Monitoring::resolveSiteForMonitorUsing(function (Monitor $monitor) use ($site, &$asked) {
+        $asked[] = $monitor->url;
+
+        return $monitor->host() === 'acme.test' ? $site : null;
+    });
+
+    Monitor::create(['url' => 'https://acme.test/', 'owner_id' => 3]);
+    Monitor::create(['url' => 'https://elsewhere.test/', 'owner_id' => 3]);
+
+    $this->artisan('monitoring:sites:backfill')
+        ->expectsOutputToContain('https://elsewhere.test/')
+        ->assertSuccessful();
+
+    expect($site->monitors()->count())->toBe(1)
+        ->and($asked)->toEqualCanonicalizing(['https://acme.test/', 'https://elsewhere.test/']);
+});

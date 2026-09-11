@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.1.7
+
+**Fixed: the import and backfill refused a resolver that declines.**
+
+Before doing anything, both commands asked the site resolver about
+`https://example.test/` and took null to mean no resolver was wired. Null is the
+documented way to decline a monitor, so a resolver that only matches sites the
+host already has — the kind that never invents rows in a table the package does
+not own — stopped both commands with "Wire
+Monitoring::resolveSiteForMonitorUsing()" while wired. A resolver that creates
+sites fared worse: it was handed the made-up URL and made a site for it on every
+run, dry runs included.
+
+The check now asks only whether a resolver is wired.
+
+**Documented: a resolver is called on a dry run.**
+
+`--dry-run` stops the package creating sites of its own, but a host's resolver
+is the host's code and is called the same way either way, so one that creates
+sites creates them during a dry run. Said beside the resolver in the guide.
+
 ## v0.1.6
 
 **Fixed: response-time statistics counted failed checks.**

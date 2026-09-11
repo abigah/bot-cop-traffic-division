@@ -86,20 +86,22 @@ class SiteMatcher
      * Fail loudly rather than silently attaching nothing. A host that supplies
      * its own site model and no resolver has an install that is half wired, and
      * finding that out from an empty manifest later is worse.
+     *
+     * Whether a resolver is wired is the whole of the question. This used to
+     * ask one about a made-up URL and treat null as "not wired", but null is
+     * the documented way to decline a monitor — so a resolver that only matches
+     * sites the host already has failed here before importing anything, and
+     * one that creates sites made a site for the made-up URL on every run.
      */
     public function guardResolverIsWired(): void
     {
-        if ($this->ownsSiteCreation()) {
+        if ($this->ownsSiteCreation() || Monitoring::hasSiteForMonitorResolver()) {
             return;
         }
 
-        $probe = new Monitor(['url' => 'https://example.test/']);
-
-        if (Monitoring::siteForMonitor($probe) === null) {
-            throw new RuntimeException(
-                'monitoring.site_model is '.Monitoring::siteModel().', so this package cannot create sites itself. '
-                .'Wire Monitoring::resolveSiteForMonitorUsing() in a service provider so it can say which site a monitor belongs to.'
-            );
-        }
+        throw new RuntimeException(
+            'monitoring.site_model is '.Monitoring::siteModel().', so this package cannot create sites itself. '
+            .'Wire Monitoring::resolveSiteForMonitorUsing() in a service provider so it can say which site a monitor belongs to.'
+        );
     }
 }

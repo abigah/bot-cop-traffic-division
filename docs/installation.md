@@ -108,7 +108,8 @@ Monitoring::resolveOwnerForSiteUsing(fn ($site) => $site->team);
 
 // Required before `monitoring:sites:backfill` or `monitoring:import:legacy`:
 // which of the host's sites a monitor belongs to. Return null to leave one
-// alone — the command reports it rather than guessing.
+// alone — the command reports it rather than guessing. It is called on a
+// --dry-run too, so a resolver that creates sites creates them then.
 Monitoring::resolveSiteForMonitorUsing(fn ($monitor) => Site::firstWhere('domain', $monitor->host()));
 
 // Optional: where a notification should send someone to look. With none, a

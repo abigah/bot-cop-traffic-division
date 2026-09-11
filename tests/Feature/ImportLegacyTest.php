@@ -1,6 +1,7 @@
 <?php
 
 use Abigah\BotCopTrafficDivision\Console\ImportLegacyMonitoring;
+use Abigah\BotCopTrafficDivision\Facades\Monitoring;
 use Abigah\BotCopTrafficDivision\Models\Monitor;
 use Abigah\BotCopTrafficDivision\Models\MonitorCheck;
 use Abigah\BotCopTrafficDivision\Models\MonitorCheckAggregate;
@@ -9,6 +10,7 @@ use Abigah\BotCopTrafficDivision\Models\MonitoredSite;
 use Abigah\BotCopTrafficDivision\Models\MonitorForgeSite;
 use Abigah\BotCopTrafficDivision\Models\MonitorIncident;
 use Abigah\BotCopTrafficDivision\Models\MonitorNotificationPreference;
+use Abigah\BotCopTrafficDivision\Tests\Fixtures\HostSite;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
@@ -490,4 +492,19 @@ it('fails when a pass takes fewer rows than the source held', function () {
 it('succeeds when every pass reconciles', function () {
     $this->artisan('monitoring:import:legacy', ['--connection' => 'legacy', '--owner' => [3]])
         ->assertSuccessful();
+});
+
+it('imports through a host resolver that declines some monitors', function () {
+    config()->set('monitoring.site_model', HostSite::class);
+
+    $site = HostSite::create(['name' => 'acme.test']);
+
+    Monitoring::resolveSiteForMonitorUsing(fn (Monitor $monitor) => $monitor->host() === 'acme.test' ? $site : null);
+
+    $this->artisan('monitoring:import:legacy', ['--connection' => 'legacy', '--owner' => [3]])
+        ->expectsOutputToContain('familylifecanada.com');
+
+    expect(Monitor::count())->toBe(2)
+        ->and(Monitor::pluck('site_id')->unique()->all())->toBe([$site->id])
+        ->and(HostSite::count())->toBe(1);
 });
