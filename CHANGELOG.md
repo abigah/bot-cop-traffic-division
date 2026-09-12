@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.1.8
+
+**Fixed: the dashboard's response time chart never drew a bar.**
+
+The bars came from an Alpine `x-for` on a `<template>` inside the `<svg>`.
+Inside SVG the HTML parser makes `<template>` an SVG element with no `content`,
+so Alpine's loop threw on its first clone and the chart stayed empty above its
+axis labels, whatever the data held. The bars are drawn in Blade now, so they
+are in the page as served and need no JavaScript.
+
+**Note for installs that build their own CSS.** The bars are coloured with
+`fill-sky-500` and `fill-red-500`, used nowhere else. A Tailwind build that does
+not scan this package's views purges them, and an unstyled `<rect>` fills black.
+Point an `@source` at `vendor/abigah/bot-cop-traffic-division/resources/views`.
+
 ## v0.1.7
 
 **Fixed: the import and backfill refused a resolver that declines.**

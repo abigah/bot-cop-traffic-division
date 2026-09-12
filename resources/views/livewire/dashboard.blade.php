@@ -108,23 +108,27 @@
         @if (count($chart['labels']) === 0)
             <flux:text variant="subtle">No checks in this period yet.</flux:text>
         @else
-            <div
-                wire:key="chart-{{ $period }}"
-                x-data="{ chart: @js($chart) }"
-                class="h-64"
-            >
-                {{-- Deliberately plain: a sparkline the host can restyle, rather
-                     than a charting library this package would have to pin. --}}
+            @php($slot = 1000 / max(1, count($chart['response_times'])))
+
+            {{-- Deliberately plain: a sparkline the host can restyle, rather
+                 than a charting library this package would have to pin.
+
+                 Drawn here rather than by Alpine. An x-for has to sit on a
+                 <template>, and inside an <svg> the parser makes that an SVG
+                 element with no content to clone, so the loop throws and not a
+                 single bar appears. --}}
+            <div wire:key="chart-{{ $period }}" class="h-64">
                 <svg viewBox="0 0 1000 240" preserveAspectRatio="none" class="h-full w-full">
-                    <template x-for="(value, index) in chart.response_times">
+                    @foreach ($chart['response_times'] as $index => $value)
+                        @php($height = $value === null ? 0 : min(240, $value / 10))
                         <rect
-                            :x="index * (1000 / chart.response_times.length)"
-                            :width="Math.max(1, (1000 / chart.response_times.length) - 1)"
-                            :y="240 - (value === null ? 0 : Math.min(240, value / 10))"
-                            :height="value === null ? 0 : Math.min(240, value / 10)"
-                            :class="chart.statuses[index] === 'down' ? 'fill-red-500' : 'fill-sky-500'"
+                            x="{{ $index * $slot }}"
+                            y="{{ 240 - $height }}"
+                            width="{{ max(1, $slot - 1) }}"
+                            height="{{ $height }}"
+                            class="{{ ($chart['statuses'][$index] ?? null) === 'down' ? 'fill-red-500' : 'fill-sky-500' }}"
                         />
-                    </template>
+                    @endforeach
                 </svg>
             </div>
 

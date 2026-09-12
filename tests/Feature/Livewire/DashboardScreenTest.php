@@ -83,6 +83,32 @@ it('counts sites down, not monitors down', function () {
     Livewire::test(Dashboard::class)->assertSeeInOrder(['Sites down', '0']);
 });
 
+/**
+ * The chart used to be an Alpine x-for inside the <svg>, which never drew a bar
+ * in a browser: the parser gives a <template> there no content to clone. It is
+ * drawn on the server now, so the bars are in the HTML the test sees.
+ */
+it('draws the response time chart on the server', function () {
+    $this->monitor->recordUptimeResult(CheckResult::fromResultsPayload(
+        [
+            'check_id' => (string) Str::ulid(),
+            'monitor_id' => (string) $this->monitor->id,
+            'checked_at' => now()->toIso8601ZuluString(),
+            'up' => true,
+            'response_time_ms' => 214,
+            'status_code' => 200,
+            'failure_reason' => null,
+            'served_from_cache' => false,
+        ],
+        ['id' => 'cf-prober-1', 'location' => 'cloudflare'],
+    ));
+
+    Livewire::test(Dashboard::class)
+        ->assertSeeHtml('height="21.4"')
+        ->assertSeeHtml('class="fill-sky-500"')
+        ->assertDontSeeHtml('x-for');
+});
+
 it('renders nothing in the banner when everything is up', function () {
     Livewire::test(ActiveIncidentBanner::class)
         ->assertOk()
