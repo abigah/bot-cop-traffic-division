@@ -284,6 +284,31 @@ it('can be run twice without duplicating anything', function () {
         ->and(MonitorNotificationPreference::count())->toBe(1);
 });
 
+/**
+ * `deleted_at` is not fillable. Passed alongside the other columns it was
+ * silently discarded, and every incident deleted on the old install arrived as
+ * if nobody had deleted it.
+ */
+it('keeps an incident deleted on the old install deleted, however often it runs', function () {
+    DB::connection('legacy')->table('monitor_incidents')->insert([
+        'monitor_id' => 141,
+        'started_at' => now()->subDays(2),
+        'resolved_at' => now()->subDays(2)->addMinutes(5),
+        'failure_reason' => 'Deleted as noise',
+        'deleted_at' => now()->subDay(),
+    ]);
+
+    $run = fn () => $this->artisan('monitoring:import:legacy', ['--connection' => 'legacy', '--owner' => [3]])
+        ->assertSuccessful();
+
+    $run();
+    $run();
+
+    expect(MonitorIncident::count())->toBe(2)
+        ->and(MonitorIncident::onlyTrashed()->count())->toBe(1)
+        ->and(MonitorIncident::onlyTrashed()->first()->failure_reason)->toBe('Deleted as noise');
+});
+
 it('writes nothing on a dry run', function () {
     $this->artisan('monitoring:import:legacy', ['--connection' => 'legacy', '--owner' => [3], '--dry-run' => true])
         ->assertSuccessful();

@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.1.9
+
+**Fixed: the legacy import brought deleted incidents back.**
+
+`monitoring:import:legacy` passed each incident's `deleted_at` alongside its
+other columns, and `deleted_at` is not fillable on `MonitorIncident`, so it was
+silently discarded: every incident deleted on the old install arrived undeleted
+and showed on the incidents screen again. It is now forced, and the incident is
+looked up with trashed rows included, so a second run finds one that arrived
+deleted rather than adding a copy.
+
+Installs that already imported can run the import again to put the deletions
+back — but it rewrites every monitor from the source as well, so on an install
+where monitors have been changed since, delete the affected incidents by hand
+instead.
+
 ## v0.1.8
 
 **Fixed: the dashboard's response time chart never drew a bar.**

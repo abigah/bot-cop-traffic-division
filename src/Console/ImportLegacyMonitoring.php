@@ -234,9 +234,17 @@ class ImportLegacyMonitoring extends Command
 
                 $monitor = Monitor::find($monitorId);
 
-                MonitorIncident::updateOrCreate(
-                    ['monitor_id' => $monitorId, 'started_at' => $row->started_at],
-                    [
+                /*
+                 | Looked up with trashed rows included and `deleted_at` forced
+                 | rather than filled. It is not fillable, so passed alongside
+                 | the rest it was silently discarded and every incident deleted
+                 | on the old install arrived undeleted; and without withTrashed()
+                 | a second run would not find one that had arrived deleted, and
+                 | would add a copy.
+                 */
+                MonitorIncident::withTrashed()
+                    ->firstOrNew(['monitor_id' => $monitorId, 'started_at' => $row->started_at])
+                    ->fill([
                         'site_id' => $monitor?->site_id,
                         'resolved_at' => $row->resolved_at,
                         'duration_seconds' => $row->duration_seconds,
@@ -246,9 +254,9 @@ class ImportLegacyMonitoring extends Command
                         'dismissed_by' => $row->dismissed_by ?? null,
                         'archived_at' => $row->archived_at ?? null,
                         'archived_by' => $row->archived_by ?? null,
-                        'deleted_at' => $row->deleted_at ?? null,
-                    ],
-                );
+                    ])
+                    ->forceFill(['deleted_at' => $row->deleted_at ?? null])
+                    ->save();
 
                 $imported++;
             }
