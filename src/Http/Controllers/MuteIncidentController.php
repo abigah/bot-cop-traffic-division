@@ -23,10 +23,12 @@ class MuteIncidentController
 
         $undo = $request->boolean('undo');
 
+        // The link has always meant "until this outage is over", so it mutes
+        // with no expiry — and replaces a shorter mute chosen elsewhere.
         if ($undo) {
-            $incident->mutedBy()->detach($recipient->getKey());
+            $incident->unmuteFor($recipient);
         } else {
-            $incident->mutedBy()->syncWithoutDetaching([$recipient->getKey()]);
+            $incident->muteFor($recipient, null);
         }
 
         return view('monitoring::incidents.muted', [

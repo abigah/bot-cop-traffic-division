@@ -3,14 +3,34 @@
 namespace Abigah\BotCopTrafficDivision\Notifications;
 
 use Abigah\BotCopTrafficDivision\Models\MonitorHeartbeat;
+use Abigah\BotCopTrafficDivision\Support\PushMessage;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Messages\VonageMessage;
 
 class HeartbeatRecoveredNotification extends MonitoringNotification
 {
+    protected const PUSH_EVENT_TYPE = 'heartbeat_recovered';
+
     protected function heartbeat(): MonitorHeartbeat
     {
         return $this->subject;
+    }
+
+    /**
+     * Named with its site, when the subscriber had a site name to hand in, and
+     * by its number when its own name gives a person nothing to read.
+     */
+    public function toPush(object $notifiable): PushMessage
+    {
+        return $this->buildPushMessage(
+            self::PUSH_EVENT_TYPE,
+            'Scheduled work resumed',
+            $this->pushBody(
+                ':subject is running again.',
+                $this->pushNameForHeartbeat($this->heartbeat()),
+                ':subject on :site is running again.',
+            ),
+        );
     }
 
     public function toMail(object $notifiable): MailMessage

@@ -2,7 +2,7 @@
     <div class="space-y-1">
         <flux:heading size="xl">What you hear about</flux:heading>
         <flux:text variant="subtle">
-            Set nothing and you get email and a notification in the app for everything —
+            Set nothing and you get email and a Desktop notification for everything —
             the right default for a system whose job is telling people things.
         </flux:text>
     </div>
@@ -23,7 +23,7 @@
                     <flux:heading size="lg">{{ $site->name }}</flux:heading>
                     <flux:text variant="subtle" class="text-xs">
                         @if ($sitePreference)
-                            {{ implode(', ', $sitePreference->channelsForEvent('uptime_failed')) ?: 'Nothing' }}
+                            {{ $sitePreference->uptime_failed ? (collect($channels)->filter(fn ($label, $field) => $sitePreference->{$field})->implode(', ') ?: 'Nothing') : 'Nothing' }}
                         @else
                             Following the defaults
                         @endif
@@ -40,10 +40,10 @@
                     <flux:text class="font-medium">How to reach you</flux:text>
 
                     <div class="flex flex-wrap gap-6">
-                        @foreach (['email_enabled' => 'Email', 'database_enabled' => 'In the app', 'sms_enabled' => 'SMS'] as $field => $label)
+                        @foreach ($channels as $field => $label)
                             <flux:checkbox
                                 :label="$label"
-                                :checked="$sitePreference?->{$field} ?? ($field !== 'sms_enabled')"
+                                :checked="$sitePreference?->{$field} ?? ! in_array($field, ['sms_enabled', 'push_enabled'], true)"
                                 wire:click="toggle('{{ $site->getKey() }}', null, '{{ $field }}')"
                             />
                         @endforeach
@@ -84,7 +84,7 @@
 
                                 <div class="flex items-center gap-4">
                                     @if ($monitorPreference)
-                                        @foreach (['email_enabled' => 'Email', 'database_enabled' => 'In the app', 'sms_enabled' => 'SMS'] as $field => $label)
+                                        @foreach ($channels as $field => $label)
                                             <flux:checkbox
                                                 :label="$label"
                                                 :checked="$monitorPreference->{$field}"

@@ -4,6 +4,7 @@ namespace Abigah\BotCopTrafficDivision\Notifications;
 
 use Abigah\BotCopTrafficDivision\Models\Monitor;
 use Abigah\BotCopTrafficDivision\Models\MonitorIncident;
+use Abigah\BotCopTrafficDivision\Support\PushMessage;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Messages\VonageMessage;
 use Illuminate\Support\Facades\URL;
@@ -11,9 +12,25 @@ use Illuminate\Support\Str;
 
 class UptimeCheckFailedNotification extends MonitoringNotification
 {
+    protected const PUSH_EVENT_TYPE = 'uptime_failed';
+
     protected function monitor(): Monitor
     {
         return $this->subject;
+    }
+
+    /**
+     * A monitor is named by its host, the way its own page is. The rest of the
+     * URL stays out of a push — a query string or credentials in a checked URL
+     * are secrets — and so does the failure reason, which is response output.
+     */
+    public function toPush(object $notifiable): PushMessage
+    {
+        return $this->buildPushMessage(
+            self::PUSH_EVENT_TYPE,
+            'Uptime check failed',
+            $this->pushBody(':subject failed its uptime check.', $this->pushNameForMonitor($this->monitor())),
+        );
     }
 
     public function toMail(object $notifiable): MailMessage
@@ -44,21 +61,27 @@ class UptimeCheckFailedNotification extends MonitoringNotification
      * A signed, per-recipient link that silences this one outage. It mutes
      * every channel, not just email: an outage that stopped mailing but kept
      * sending SMS would not be muted in any sense the recipient meant.
+     *
+     * The outage is the one the subscriber handed in, so the link costs no
+     * query per recipient and names the same outage the push does. Built
+     * directly without one, the notification finds the monitor's ongoing
+     * outage itself.
      */
     protected function muteUrl(object $notifiable): ?string
     {
-        $incident = MonitorIncident::query()
+        $incidentId = $this->incidentId ?? MonitorIncident::query()
             ->where('monitor_id', $this->monitor()->getKey())
             ->ongoing()
             ->latest('started_at')
-            ->first();
+            ->first()
+            ?->getKey();
 
-        if ($incident === null) {
+        if ($incidentId === null) {
             return null;
         }
 
         return URL::signedRoute('monitoring.incident.mute', [
-            'incident' => $incident->getKey(),
+            'incident' => $incidentId,
             'notifiable' => $notifiable->getKey(),
         ]);
     }

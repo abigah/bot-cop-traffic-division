@@ -3,15 +3,34 @@
 namespace Abigah\BotCopTrafficDivision\Notifications;
 
 use Abigah\BotCopTrafficDivision\Models\Monitor;
+use Abigah\BotCopTrafficDivision\Support\PushMessage;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Messages\VonageMessage;
 use Illuminate\Support\Str;
 
 class CertificateCheckFailedNotification extends MonitoringNotification
 {
+    /**
+     * The push's event type. toArray() keeps its older `certificate_check_failed`
+     * for the database channel's existing rows; a push uses the subscriber's name.
+     */
+    protected const PUSH_EVENT_TYPE = 'certificate_failed';
+
     protected function monitor(): Monitor
     {
         return $this->subject;
+    }
+
+    /**
+     * The failure reason stays out: it is handshake output, not a name.
+     */
+    public function toPush(object $notifiable): PushMessage
+    {
+        return $this->buildPushMessage(
+            self::PUSH_EVENT_TYPE,
+            'Certificate check failed',
+            $this->pushBody('The SSL certificate for :subject is invalid.', $this->pushNameForMonitor($this->monitor())),
+        );
     }
 
     public function toMail(object $notifiable): MailMessage

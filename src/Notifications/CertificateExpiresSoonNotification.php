@@ -3,14 +3,30 @@
 namespace Abigah\BotCopTrafficDivision\Notifications;
 
 use Abigah\BotCopTrafficDivision\Models\Monitor;
+use Abigah\BotCopTrafficDivision\Support\PushMessage;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Messages\VonageMessage;
 
 class CertificateExpiresSoonNotification extends MonitoringNotification
 {
+    protected const PUSH_EVENT_TYPE = 'certificate_expires_soon';
+
     protected function monitor(): Monitor
     {
         return $this->subject;
+    }
+
+    /**
+     * No date: the expiry date is the monitor's current state, which a renewal
+     * can change before a worker describes the push. The date is one tap away.
+     */
+    public function toPush(object $notifiable): PushMessage
+    {
+        return $this->buildPushMessage(
+            self::PUSH_EVENT_TYPE,
+            'Certificate expiring soon',
+            $this->pushBody('The SSL certificate for :subject expires soon.', $this->pushNameForMonitor($this->monitor())),
+        );
     }
 
     public function toMail(object $notifiable): MailMessage

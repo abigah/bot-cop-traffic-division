@@ -29,6 +29,16 @@ trait HasNotificationChannels
             $channels[] = 'vonage';
         }
 
+        // The host supplies the push channel; with none named, the switch
+        // has nothing to deliver through and adds nothing. Read with a
+        // fallback like the event switch, so a preference object from before
+        // push existed answers exactly as it always did.
+        $pushChannel = config('monitoring.notification_channels.push');
+
+        if (($this->push_enabled ?? false) && is_string($pushChannel) && $pushChannel !== '') {
+            $channels[] = $pushChannel;
+        }
+
         return $channels;
     }
 

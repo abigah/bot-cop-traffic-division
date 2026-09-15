@@ -90,8 +90,36 @@ class NotificationPreferences extends Component
             'openSite' => $this->openSiteId === null ? null : $query->findSite($this->openSiteId),
             'sitePreferences' => $rows->whereNotNull('site_id')->keyBy('site_id'),
             'monitorPreferences' => $rows->whereNotNull('monitor_id')->keyBy('monitor_id'),
+            'channels' => $this->channels(),
             'events' => self::EVENTS,
         ]);
+    }
+
+    /**
+     * The ways to reach someone, keyed by the column holding each switch.
+     *
+     * The database channel is called Desktop here; only the label says so,
+     * because the column and the channel keep their names. Push is offered
+     * only when the host has named a channel to deliver it — without one the
+     * switch would do nothing.
+     *
+     * @return array<string, string>
+     */
+    protected function channels(): array
+    {
+        $channels = [
+            'email_enabled' => 'Email',
+            'database_enabled' => 'Desktop',
+            'sms_enabled' => 'SMS',
+        ];
+
+        $pushChannel = config('monitoring.notification_channels.push');
+
+        if (is_string($pushChannel) && $pushChannel !== '') {
+            $channels['push_enabled'] = 'Push';
+        }
+
+        return $channels;
     }
 
     protected function recipient(): ?Model
@@ -136,9 +164,7 @@ class NotificationPreferences extends Component
     protected function isAllowedField(string $field): bool
     {
         return in_array($field, [
-            'email_enabled',
-            'database_enabled',
-            'sms_enabled',
+            ...array_keys($this->channels()),
             ...array_keys(self::EVENTS),
         ], true);
     }

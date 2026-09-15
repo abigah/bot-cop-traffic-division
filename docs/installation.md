@@ -94,7 +94,8 @@ use Abigah\BotCopTrafficDivision\Facades\Monitoring;
 // Required.
 Monitoring::resolveCurrentOwnerUsing(fn () => auth()->user()->currentTeam);
 Monitoring::resolveRecipientsUsing(fn ($owner, $subject) => $owner->users);
-// Anything returning an array of channel names: mail, database, vonage. This
+// Anything returning an array of channel names: mail, database, vonage, and the
+// host's push channel class when one is configured (see "Push" below). This
 // hands it to the package's own per-recipient preferences, which is what the
 // preferences screen writes; a host wanting a rota, an escalation policy or
 // quiet hours writes its own and never calls this.
@@ -337,6 +338,52 @@ Finally, SMS is off per recipient until somebody turns it on: `sms_enabled`
 defaults to false on a preference row, and a recipient who has set nothing gets
 mail and an in-app notification. Configuring all of the above enables the
 possibility, not the behaviour.
+
+## Push
+
+Push is optional, and off unless the host asks for it. The package never
+delivers a push itself. It names no provider and knows nothing about devices, so
+the host supplies a Laravel notification channel and names it:
+
+```php
+// config/monitoring.php
+'notification_channels' => [
+    'push' => \App\Notifications\Channels\PushChannel::class,
+],
+```
+
+With that set, the preferences screen offers a Push checkbox beside Email,
+Desktop and SMS. `preferenceChannelsFor()` includes the class among a
+recipient's channels only when three things hold: the event's own switch is on
+(`uptime_failed`, say), their `push_enabled` switch is on, and the config key is
+a non-empty string naming the class. The switch is off on every preference row,
+including rows written before it existed, and Push is not in the channels of a
+recipient who has set nothing, unless defaults the host supplies through
+`resolveDefaultPreferencesUsing()` turn it on. Left null, Push is neither
+offered nor added, whatever a saved preference says.
+
+Every notification the package sends implements `Contracts\ProvidesPushMessage`.
+A channel's `send()` calls `toPush($notifiable)` and gets a
+`Support\PushMessage` holding:
+
+- a title and body within `PushMessage::TITLE_MAX_LENGTH` and
+  `BODY_MAX_LENGTH` code points;
+- the owner id;
+- where tapping the push should lead;
+- the incident, if any;
+- when the event happened;
+- whether it is Time Sensitive.
+
+A notification built without an owner id cannot say whose push it is, so its
+`toPush()` throws `LogicException` rather than guessing. The package's
+subscriber always supplies one; only a notification the host constructs itself
+can be missing it.
+
+Turning that into a provider's payload, and finding the recipient's devices, is
+the channel's job.
+
+"Desktop" is only the label the preferences screen gives the `database` channel.
+The column and the channel keep their names.
 
 ## A second prober
 

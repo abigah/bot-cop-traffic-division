@@ -250,6 +250,12 @@ class Monitor extends Model
      *
      * Idempotent on `check_id`: a delivery retried after a timeout replays as
      * nothing, so the prober can retry freely.
+     *
+     * A failure is told only once the check is recorded and its outage is open,
+     * so even the first page of an outage can name its incident, and a listener
+     * that throws cannot leave the check unwritten for a retry to count twice.
+     * A recovery is told before its incident is resolved, so it can still find
+     * the outage that is ending.
      */
     public function recordUptimeResult(CheckResult $result): MonitorCheck
     {
@@ -274,10 +280,12 @@ class Monitor extends Model
             return $this->recordWithoutJudging($result);
         }
 
+        $alerting = false;
+
         if ($result->up) {
             $this->markUptimeUp($result->checkedAt);
         } else {
-            $this->markUptimeDown($result->failureReason ?? '', $result->checkedAt);
+            $alerting = $this->markUptimeDown($result->failureReason ?? '', $result->checkedAt);
         }
 
         if ($result->servedFromCache) {
@@ -290,6 +298,10 @@ class Monitor extends Model
             $this->resolveOpenIncident($result->checkedAt);
         } else {
             $this->openIncident($result->failureReason, $result->checkedAt);
+        }
+
+        if ($alerting) {
+            event(new UptimeCheckFailed($this));
         }
 
         return $check;
@@ -350,12 +362,16 @@ class Monitor extends Model
     }
 
     /**
-     * Record a failed check. While a deployment window is open the failure is
-     * still recorded, but the consecutive-failure counter is held at zero and no
-     * event fires, so alerting starts fresh once the window closes rather than
+     * Record a failed check, and say whether it is time to tell anybody.
+     *
+     * The alert is recorded as sent here, but the event is left to
+     * recordUptimeResult(), which fires it once the check and the incident are
+     * written. While a deployment window is open the failure is still
+     * recorded, but the consecutive-failure counter is held at zero and nobody
+     * is told, so alerting starts fresh once the window closes rather than
      * paging about a restart.
      */
-    protected function markUptimeDown(string $reason, CarbonInterface $checkedAt): void
+    protected function markUptimeDown(string $reason, CarbonInterface $checkedAt): bool
     {
         if ($this->uptime_status !== UptimeStatus::DOWN->value || $this->uptime_status_last_change_date === null) {
             $this->uptime_status_last_change_date = $checkedAt;
@@ -369,18 +385,20 @@ class Monitor extends Model
             $this->uptime_check_times_failed_in_a_row = 0;
             $this->save();
 
-            return;
+            return false;
         }
 
         $this->uptime_check_times_failed_in_a_row++;
         $this->save();
 
-        if ($this->shouldFireUptimeFailedEvent($checkedAt)) {
-            $this->uptime_check_failed_event_fired_on_date = $checkedAt;
-            $this->save();
-
-            event(new UptimeCheckFailed($this));
+        if (! $this->shouldFireUptimeFailedEvent($checkedAt)) {
+            return false;
         }
+
+        $this->uptime_check_failed_event_fired_on_date = $checkedAt;
+        $this->save();
+
+        return true;
     }
 
     /**

@@ -3,14 +3,30 @@
 namespace Abigah\BotCopTrafficDivision\Notifications;
 
 use Abigah\BotCopTrafficDivision\Models\Monitor;
+use Abigah\BotCopTrafficDivision\Support\PushMessage;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Messages\VonageMessage;
 
 class DomainExpiresSoonNotification extends MonitoringNotification
 {
+    protected const PUSH_EVENT_TYPE = 'domain_expires_soon';
+
     protected function monitor(): Monitor
     {
         return $this->subject;
+    }
+
+    /**
+     * No date, days left or registrar: those are the monitor's current state,
+     * and the days left would change with the hour a worker got round to it.
+     */
+    public function toPush(object $notifiable): PushMessage
+    {
+        return $this->buildPushMessage(
+            self::PUSH_EVENT_TYPE,
+            'Domain expiring soon',
+            $this->pushBody('The domain registration for :subject expires soon.', $this->pushNameForMonitor($this->monitor())),
+        );
     }
 
     public function toMail(object $notifiable): MailMessage

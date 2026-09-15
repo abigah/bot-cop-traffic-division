@@ -3,14 +3,26 @@
 namespace Abigah\BotCopTrafficDivision\Notifications;
 
 use Abigah\BotCopTrafficDivision\Models\Monitor;
+use Abigah\BotCopTrafficDivision\Support\PushMessage;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Messages\VonageMessage;
 
 class UptimeCheckRecoveredNotification extends MonitoringNotification
 {
+    protected const PUSH_EVENT_TYPE = 'uptime_recovered';
+
     protected function monitor(): Monitor
     {
         return $this->subject;
+    }
+
+    public function toPush(object $notifiable): PushMessage
+    {
+        return $this->buildPushMessage(
+            self::PUSH_EVENT_TYPE,
+            'Monitor recovered',
+            $this->pushBody(':subject has recovered.', $this->pushNameForMonitor($this->monitor())),
+        );
     }
 
     public function toMail(object $notifiable): MailMessage

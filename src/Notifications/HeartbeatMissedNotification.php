@@ -4,6 +4,7 @@ namespace Abigah\BotCopTrafficDivision\Notifications;
 
 use Abigah\BotCopTrafficDivision\Enums\HeartbeatStatus;
 use Abigah\BotCopTrafficDivision\Models\MonitorHeartbeat;
+use Abigah\BotCopTrafficDivision\Support\PushMessage;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Messages\VonageMessage;
 
@@ -17,9 +18,35 @@ use Illuminate\Notifications\Messages\VonageMessage;
  */
 class HeartbeatMissedNotification extends MonitoringNotification
 {
+    protected const PUSH_EVENT_TYPE = 'heartbeat_missing';
+
     protected function heartbeat(): MonitorHeartbeat
     {
         return $this->subject;
+    }
+
+    /**
+     * Not headline(), which reads the heartbeat's status: a worker reloading
+     * the heartbeat may find it running again, and the push would then say
+     * something other than what happened. "Did not run as expected" is true of
+     * a job that never ran, one that never finished and one that reported
+     * failing. The last message stays out too — it is the job's own output.
+     *
+     * A job's name does not say which site it runs on, so the site's name goes
+     * with it whenever the subscriber had one to hand in. A job with no name a
+     * person could read is called by its number.
+     */
+    public function toPush(object $notifiable): PushMessage
+    {
+        return $this->buildPushMessage(
+            self::PUSH_EVENT_TYPE,
+            'Scheduled work missed',
+            $this->pushBody(
+                ':subject did not run as expected.',
+                $this->pushNameForHeartbeat($this->heartbeat()),
+                ':subject on :site did not run as expected.',
+            ),
+        );
     }
 
     protected function headline(): string

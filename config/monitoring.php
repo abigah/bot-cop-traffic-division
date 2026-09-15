@@ -55,6 +55,25 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Notification channels
+    |--------------------------------------------------------------------------
+    |
+    | Delivery this package offers but does not implement. `push` is the class
+    | of a Laravel notification channel the host application supplies; the
+    | package only stores whether each recipient wants it and hands this class
+    | back among their channels.
+    |
+    | Leave it null and Push is neither offered on the preferences screen nor
+    | added to anyone's channels, whatever their saved preference says.
+    |
+    */
+
+    'notification_channels' => [
+        'push' => null,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Checker
     |--------------------------------------------------------------------------
     |

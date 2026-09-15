@@ -1,5 +1,229 @@
 # Changelog
 
+## v0.1.10
+
+Four things a host can build on: acknowledging an incident, muting one for a
+while, a Push preference, and a description of every event fit for a push. They
+arrive with three migrations and a few changes every host will see, whether or
+not it uses any of the four, so those come first.
+
+**Upgrading.**
+
+Run `php artisan migrate` before the new code serves requests. Three migrations
+add columns:
+
+- `acknowledged_at` and `acknowledged_by` to `monitor_incidents`;
+- `muted_until` to `monitor_incident_notification_mutes`;
+- `push_enabled` to `monitor_notification_preferences`.
+
+Migrate first because every preference row the package inserts now writes
+`push_enabled`. Existing rows keep their meaning: nobody has acknowledged
+anything, every mute lasts until recovery, and nobody is pushed to. All three
+migrations roll back.
+
+A published `config/monitoring.php` needs no change, because
+`notification_channels.push` is null when it is absent. To offer Push, set it to
+the host's channel class:
+
+```php
+'notification_channels' => [
+    'push' => \App\Notifications\Channels\PushChannel::class,
+],
+```
+
+A host that published the package's views (the `monitoring-views` tag) and
+overrode `livewire/notification-preferences.blade.php` has to republish that
+view or merge the new one into its copy. Until it does, the screen still labels
+the `database` channel "In the app", offers no Push checkbox, and summarises
+each site by raw channel names, including the push channel's class for a
+recipient with Push on.
+
+**Behaviour changes for all hosts.**
+
+**An outage is open before it is announced.** `UptimeCheckFailed` used to fire
+from inside `markUptimeDown()`, before the check was written and before the
+incident was opened. It now fires from `recordUptimeResult()`, after both. So a
+listener sees the check and the incident, and the first failure news of an
+outage names its incident, whatever
+`fire_failed_event_after_consecutive_failures` says.
+
+A listener that throws still passes its error to the caller, but it no longer
+loses the check: by then the check, the incident and the alert's sent time are
+already written. The alert counts as sent, so it is not repeated before the
+resend interval. A prober retrying the same delivery replays as nothing, rather
+than counting the failure a second time.
+
+Two smaller consequences follow:
+
+- A recovery's push routes only to the outage that is ending. With no ongoing
+  incident it carries none, never one that ended long ago.
+- The mute link in a failure email uses the incident the notification was built
+  with, so it is there from the very first email.
+
+**The preferences screen says "Desktop".** The package's preferences screen
+labels the `database` channel's checkbox "Desktop" where it said "In the app".
+Only the label changed: the `database_enabled` column and the `database` channel
+keep their names. A site's summary line lists its channels by those labels
+("Email, Desktop") rather than by channel names such as `mail, database`.
+
+**The mute link replaces a timed mute.** The signed mute link in a failure email
+still means "until this outage is over". When the recipient has chosen a timed
+mute somewhere else, following the link replaces it with a mute until recovery.
+
+**Added: acknowledging an incident.**
+
+`MonitorIncident::acknowledge($user, $at = null)` records who has an outage in
+hand and when, and returns whether this call was the one recorded. The first
+acknowledgement wins. The write is a single update that lands only while
+`acknowledged_at` is empty, so two people answering at once, or a client
+retrying, cannot replace who answered or when. It still lands after the outage
+has resolved, because a late answer was still an answer. Either way the model is
+refreshed to show the acknowledgement that stands.
+
+`acknowledgedByUser()` resolves the person through `monitoring.notifiable_model`.
+`acknowledged_by` is a plain column of the same type as `dismissed_by`, with its
+own index and no foreign key to the host's table.
+
+**Added: muting an incident for a while.**
+
+`muteFor($user, $until)` silences one outage for one recipient until a time, or
+until recovery when `$until` is null. Choosing again replaces the earlier choice
+rather than adding a second one. `unmuteFor($user)` removes only that
+recipient's mute. `isMutedBy($user, $at = null)` says whether their mute is live
+at that moment, and now by default.
+
+A mute whose time has passed is inactive from that moment, whether or not
+anything has deleted its row: both the subscriber and `isMutedBy()` compare
+against the clock. `mutedBy()` still returns every recorded choice, expired ones
+included, because replacing a choice needs the row that is there. Use
+`isMutedBy()` to ask whether a mute is live. Recoveries are never muted, whatever
+kind of mute is held.
+
+`muteFor()` writes its row even when the incident has already resolved. That
+changes no delivery, because only ongoing incidents are consulted when deciding
+who is muted. A host that wants muting a resolved incident to do nothing should
+check `isOngoing()` first.
+
+Times passed to `muteFor()`, `isMutedBy($at)` and `acknowledge($at)` are stored
+and compared as given, as Laravel usually does, with no conversion between
+timezones. Pass them in the application's timezone, as `now()->addMinutes(15)`
+is.
+
+**Added: a Push preference, delivered by the host.**
+
+`monitoring.notification_channels.push` names a Laravel notification channel
+class that the host supplies. The package delivers no push itself. It stores
+whether each recipient wants one, in a new `push_enabled` column defaulting to
+false. `channelsForEvent()` adds the class to a recipient's channels only when
+that switch is on *and* the class is set. Leave the key null and nothing
+changes: Push is not offered, and it is never added, whatever a saved preference
+says.
+
+When the key is set, the preferences screen offers a Push checkbox at site and
+monitor level.
+
+**Added: a description of every event for push, tied to no provider.**
+
+`Support\PushMessage` is a readonly value object holding what a push channel
+needs. `toArray()` gives these keys:
+
+- `event_type`, `title` and `body`;
+- `owner_id`;
+- `destination_type` and `destination_id`, where tapping the push should lead.
+  The type is `monitor`, `heartbeat` or `exception`, and anything else is
+  refused;
+- `incident_id`;
+- `occurred_at`, an ISO-8601 UTC string in whole seconds with a trailing `Z`;
+- `time_sensitive`.
+
+It names no delivery provider. The host's channel turns it into whatever its
+provider expects.
+
+`PushMessage::TITLE_MAX_LENGTH` is 64 and `BODY_MAX_LENGTH` is 178, both counted
+in Unicode code points. The package's own notifications stay within them: they
+cut text between characters as a person sees them and end it with an ellipsis.
+The class does not enforce them, though, so a channel that accepts messages
+built elsewhere should check for itself.
+
+`Contracts\ProvidesPushMessage` declares `toPush(object $notifiable): PushMessage`,
+and all eight notifications implement it:
+
+| Notification | `event_type` | destination |
+|---|---|---|
+| Uptime check failed | `uptime_failed` | `monitor` |
+| Uptime check recovered | `uptime_recovered` | `monitor` |
+| Certificate check failed | `certificate_failed` | `monitor` |
+| Certificate expires soon | `certificate_expires_soon` | `monitor` |
+| Domain expires soon | `domain_expires_soon` | `monitor` |
+| Heartbeat missed | `heartbeat_missing` | `heartbeat` |
+| Heartbeat recovered | `heartbeat_recovered` | `heartbeat` |
+| Site exception reported | `exception_reported` | `exception` |
+
+A push's words name what the event concerns and leave out anything that could
+leak:
+
+- **A monitor** is named by its URL's host. The rest of the URL can carry
+  credentials or a query string, so it stays out. A URL with no clean host falls
+  back to the monitor's name, then its number.
+- **A scheduled job** is named by its own name, or its number when that name
+  gives nothing to read.
+- **An exception** is named by its short class, never its message, file or
+  trace.
+- **Nothing else goes in:** no failure reason, status or expiry date.
+  Control characters and invisible characters are stripped.
+- **Heartbeat and exception pushes also name the site**, when the site has a
+  `name`.
+
+The subscriber works five things out once per event and hands the same answers
+to every recipient: the owner, the incident, the Time Sensitive flag, the site's
+name and the moment. A queue worker describing the push never looks those up
+again, so a retried job reports when the event happened, not when a worker got
+to it, and the site's name is the one it had then. The subject is another
+matter: the worker reloads it, so a monitor's URL or name, or a scheduled job's
+name, changed before delivery is what the push says.
+
+Time Sensitive is true only in two cases: a critical monitor's uptime or
+certificate failure, or a missed heartbeat or new exception while the site's
+outage is open. Warnings and recoveries never are. `incident_id` depends on the
+event:
+
+- a monitor's failures and its recovery carry the monitor's ongoing incident;
+- heartbeat and exception news carry the site's open incident;
+- expiry warnings and heartbeat recoveries carry none.
+
+**Breaking, for code that extends package classes.**
+
+Public calls keep working. These protected APIs changed:
+
+- `MonitorEventSubscriber::mutedRecipientKeys()` takes the event's
+  `?MonitorIncident` instead of the subject.
+- `MonitorEventSubscriber::ownerFor()` is now `ownerAndSiteFor()`, and returns
+  `[$owner, $site]`.
+- `MonitorEventSubscriber::siteIncidentFor(Model $subject, ?Model $site = null)`
+  gained its second argument, which an override has to accept.
+- The subscriber has new protected `incidentFor(Model $subject, string
+  $eventType, ?Model $site = null)`, `isTimeSensitive()` and `siteNameFor()`.
+- `Monitor::markUptimeDown()` returns `bool`, meaning whether to alert, and no
+  longer fires `UptimeCheckFailed` itself.
+- `MonitoringNotification`'s constructor gained optional trailing `ownerId`,
+  `incidentId`, `timeSensitive`, `occurredAt` and `siteName` arguments.
+  `new SomeNotification($subject, $channels)` still works. Pass the new
+  arguments by name, since more may be added after them.
+- `MonitoringNotification` implements `ProvidesPushMessage`. Its base `toPush()`
+  throws `LogicException` until a subclass maps it, and so does
+  `buildPushMessage()` on a notification built without an owner id. The new
+  protected helpers are `buildPushMessage()`, `pushBody()`,
+  `pushNameForMonitor()`, `pushNameForHeartbeat()`, `pushNameForException()` and
+  `pushDestination()`.
+
+**Known issue: anonymous exception classes in mail and SMS.**
+
+An exception thrown from an anonymous class is still named in the mail subject
+and SMS text by a label taken from the file it was declared in, such as
+`Thrower.php:3$0`. `shortClass()` takes the last path segment of PHP's generated
+class name. This is cosmetic and unchanged from earlier releases. The push names
+the class the anonymous class extends.
+
 ## v0.1.9
 
 **Fixed: the legacy import brought deleted incidents back.**
