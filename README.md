@@ -6,9 +6,8 @@ deployment windows, exception reports, per-recipient notification preferences
 and a dashboard — fed either by its own scheduler or by a prober running outside
 its infrastructure.
 
-> Status: feature complete and not yet installed anywhere. See
-> [docs/installation.md](docs/installation.md) to install it, and
-> [docs/HANDOFF.md](docs/HANDOFF.md) for what was decided and why.
+> Status: in production. See [docs/installation.md](docs/installation.md) to
+> install it.
 
 ## The shape of it
 
