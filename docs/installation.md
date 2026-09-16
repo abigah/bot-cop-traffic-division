@@ -220,8 +220,10 @@ incident open and a notification go out.
 ## Pausing a monitor
 
 Clearing `uptime_check_enabled` stops the alerting **immediately** and stops the
-checking at the prober's **next reconcile** — up to the reconcile interval later,
-which on a live install has been around eighteen minutes.
+checking at the prober's **next reconcile**. In practice that is seconds: saving
+dispatches a change notice, and the prober pulls a fresh manifest when it
+arrives. The periodic reconcile behind it is hourly, and is the net under a
+notice that never got there rather than the thing you are waiting on.
 
 The two are separate because a prober works from a plan built when it last
 pulled a manifest, and keeps delivering results for anything paused since. Those
@@ -475,6 +477,31 @@ The prober pulls `GET /monitoring/manifest`, checks what it finds, and delivers
 to `POST /monitoring/results`. This application replays those through the same
 seam its own checks used, so incidents, thresholds and notifications behave
 exactly as they did the day before.
+
+## Asking for the buffer early
+
+A prober batches up results while everything is up, because every delivery wakes
+an application that sleeps between requests. That leaves the screens showing
+checks that stop at the last batch — never a missed outage, since anything down
+and any monitor changing status at all is delivered within the minute, but a
+last-checked time that can be an hour behind.
+
+Opening the dashboard, a site or a monitor's history asks the probers for what
+they are holding, if the last delivery is older than
+`monitoring.flush_when_stale_after_minutes` (default 5, zero to turn it off).
+The reasoning is that somebody is looking, so the application is awake and the
+wake a delivery would cost has already been paid.
+
+It is a notice, not a pull: `POST {prober}/tenants/{tenant}/flush`, empty-bodied
+and HMAC-signed with the tenant secret, and the prober answers by delivering
+through the same endpoint and the same cursor as any scheduled batch. Signed
+where a change notice is not, because this one makes the prober deliver and a
+delivery wakes this application — an open version of it is a way to run up
+somebody's hosting bill. The prober acts on its next sweep, so however often it
+is asked, it is one delivery a minute at worst.
+
+`RequestProberFlush` is queued, so a prober that is slow or unreachable never
+holds up a page render.
 
 Run both modes side by side for a while first and compare timelines. They are
 answering the same questions — the heartbeat site rule on both sides is bound to

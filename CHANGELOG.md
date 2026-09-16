@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.1.11
+
+**The screens ask the probers for what they are holding.**
+
+Results batch on the prober's slow cadence because every delivery wakes an
+application that sleeps between requests. That is the right trade while nobody
+is looking and the wrong one the moment somebody is: the application is awake,
+the wake has been paid for, and the screens were still showing checks that
+stopped at the last batch.
+
+Opening the dashboard, a site or a monitor's history now sends
+`POST {prober}/tenants/{tenant}/flush` — empty-bodied, HMAC-signed, queued — if
+the last delivery is older than `monitoring.flush_when_stale_after_minutes`
+(default 5, zero to turn it off). The prober answers by delivering through the
+same endpoint and cursor as any scheduled batch; nothing is pulled and there is
+no second way for results to arrive.
+
+It only ever buys the green. Anything down, and any monitor changing status at
+all, was already delivered within the minute, so no screen was ever wrong about
+an outage — what it was missing was the "still up" checks since the last batch
+and the last-checked times that go with them.
+
+**Needs a prober that serves the endpoint.** Older probers answer 404 and the
+notice is logged and dropped, which leaves the screens exactly as stale as they
+were before.
+
+**Also carries the tests for v0.1.10's features.** Incident acknowledgement,
+timed mutes and the push descriptions shipped in v0.1.10 ahead of their tests.
+Nothing about those features changes here; they are only covered now.
+
 ## v0.1.10
 
 Four things a host can build on: acknowledging an incident, muting one for a

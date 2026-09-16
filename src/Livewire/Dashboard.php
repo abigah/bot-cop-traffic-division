@@ -18,6 +18,14 @@ class Dashboard extends Component
 {
     public string $period = '24h';
 
+    public function mount(): void
+    {
+        // Somebody is looking, so this application is awake and the wake a
+        // delivery costs has been paid. Ask the probers for what they have been
+        // holding rather than showing checks that stop an hour ago.
+        Monitoring::requestFlushIfStale();
+    }
+
     public function render(): View
     {
         $query = MonitorQuery::forCurrentOwner();

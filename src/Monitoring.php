@@ -6,8 +6,11 @@ use Abigah\BotCopTrafficDivision\Contracts\ForgeSiteProvider;
 use Abigah\BotCopTrafficDivision\Jobs\CheckCertificateJob;
 use Abigah\BotCopTrafficDivision\Jobs\CheckDomainExpiryJob;
 use Abigah\BotCopTrafficDivision\Jobs\CheckUptimeJob;
+use Abigah\BotCopTrafficDivision\Jobs\RequestProberFlush;
 use Abigah\BotCopTrafficDivision\Models\Monitor;
 use Abigah\BotCopTrafficDivision\Models\MonitorNotificationPreference;
+use Abigah\BotCopTrafficDivision\Models\MonitorProberStatus;
+use Carbon\Carbon;
 use Closure;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Contracts\Support\Arrayable;
@@ -309,6 +312,54 @@ class Monitoring
     public function probers(): array
     {
         return config('monitoring.probers', []);
+    }
+
+    /**
+     * Ask the probers for what they are holding, if it has been a while.
+     *
+     * Call it from a screen. Results batch on a slow cadence because each
+     * delivery wakes an application that sleeps between requests — a trade that
+     * is only worth making while nobody is looking. Somebody is looking now, the
+     * application is awake, and the wake has already been paid for.
+     *
+     * What it buys is only the green. Anything down, and any monitor changing
+     * status at all, is delivered within the minute either way, so a screen is
+     * never wrong about an outage — it is missing the "still up" checks since
+     * the last batch, and the last-checked times that go with them.
+     *
+     * Returns whether a notice was dispatched, which is also what makes this
+     * testable without a prober.
+     */
+    public function requestFlushIfStale(): bool
+    {
+        // Local mode has no prober to ask; this application does its own
+        // checking, and nothing is ever waiting to be sent.
+        if (! $this->checksRemotely()) {
+            return false;
+        }
+
+        $staleAfter = (int) config('monitoring.flush_when_stale_after_minutes', 5);
+
+        // Zero turns it off, for an installation that would rather pay for the
+        // hourly batch and nothing else.
+        if ($staleAfter <= 0) {
+            return false;
+        }
+
+        // The freshest delivery from any prober. `max()` answers from the
+        // database and so misses the model's casts, which is why it is parsed
+        // here rather than compared as the string it arrives as.
+        $freshest = MonitorProberStatus::query()->max('last_results_at');
+
+        // Never delivered is stale: a prober holding results since before this
+        // application ever heard from it is exactly the case worth asking about.
+        if ($freshest !== null && Carbon::parse($freshest)->gt(now()->subMinutes($staleAfter))) {
+            return false;
+        }
+
+        RequestProberFlush::dispatch();
+
+        return true;
     }
 
     /**

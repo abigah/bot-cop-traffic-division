@@ -29,6 +29,11 @@ class MonitorHistory extends Component
     {
         // Scoped: an id from the URL cannot reach another owner's monitor.
         $this->monitorId = MonitorQuery::forCurrentOwner()->findMonitorOrFail($monitor)->getKey();
+
+        // The screen where a stale last-checked time is most visible, and the
+        // application is awake to be reading it. See
+        // Monitoring::requestFlushIfStale().
+        Monitoring::requestFlushIfStale();
     }
 
     public function render(): View

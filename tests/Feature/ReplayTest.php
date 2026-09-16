@@ -2,10 +2,14 @@
 
 use Abigah\BotCopTrafficDivision\Enums\UptimeStatus;
 use Abigah\BotCopTrafficDivision\Events\UptimeCheckFailed;
+use Abigah\BotCopTrafficDivision\Facades\Monitoring;
 use Abigah\BotCopTrafficDivision\Models\MonitorCheck;
 use Abigah\BotCopTrafficDivision\Models\MonitoredSite;
+use Abigah\BotCopTrafficDivision\Notifications\UptimeCheckFailedNotification;
 use Abigah\BotCopTrafficDivision\Support\CheckResult;
+use Abigah\BotCopTrafficDivision\Tests\Fixtures\User;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Str;
 
 /**
@@ -56,6 +60,57 @@ it('is idempotent on check_id, so a retried delivery replays as nothing', functi
 
     expect(MonitorCheck::count())->toBe(1)
         ->and($second->is($first))->toBeTrue();
+});
+
+/**
+ * A listener that fails — a queue that is down, a host's own listener with a
+ * bug — must not cost the record. The prober retries the delivery, and the
+ * retry has to find the check and the outage already written rather than count
+ * the failure twice, or tell anybody about it a second time.
+ */
+it('keeps the check and the outage when telling anyone about it fails', function () {
+    config()->set('monitoring.uptime.fire_failed_event_after_consecutive_failures', 1);
+
+    $recipient = User::create(['name' => 'On call', 'email' => 'oncall@test.dev']);
+
+    Monitoring::resolveOwnerForSiteUsing(fn () => $recipient);
+    Monitoring::resolveRecipientsUsing(fn () => [$recipient]);
+    Monitoring::resolveChannelsUsing(fn () => ['mail']);
+
+    Notification::fake();
+
+    // Unavailable the first time, back by the time the prober retries.
+    $told = 0;
+    Event::listen(UptimeCheckFailed::class, function () use (&$told): void {
+        if (++$told === 1) {
+            throw new RuntimeException('Queue unavailable');
+        }
+    });
+
+    $result = CheckResult::down('Down');
+
+    expect(fn () => $this->monitor->recordUptimeResult($result))
+        ->toThrow(RuntimeException::class, 'Queue unavailable');
+
+    $monitor = $this->monitor->fresh();
+
+    expect($monitor->checks()->count())->toBe(1)
+        ->and($monitor->incidents()->ongoing()->count())->toBe(1)
+        ->and($monitor->uptime_check_times_failed_in_a_row)->toBe(1)
+        ->and($told)->toBe(1);
+
+    Notification::assertSentToTimes($recipient, UptimeCheckFailedNotification::class, 1);
+
+    // The prober retries the same delivery.
+    $monitor->recordUptimeResult($result);
+    $monitor->refresh();
+
+    expect($monitor->checks()->count())->toBe(1)
+        ->and($monitor->incidents()->count())->toBe(1)
+        ->and($monitor->uptime_check_times_failed_in_a_row)->toBe(1)
+        ->and($told)->toBe(1);
+
+    Notification::assertSentToTimes($recipient, UptimeCheckFailedNotification::class, 1);
 });
 
 /**

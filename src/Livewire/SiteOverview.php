@@ -45,6 +45,10 @@ class SiteOverview extends Component
         }
 
         $this->siteId = $site;
+
+        // Awake anyway: ask for whatever the probers are holding. See
+        // Monitoring::requestFlushIfStale().
+        Monitoring::requestFlushIfStale();
     }
 
     public function resolveException(int $exception): void

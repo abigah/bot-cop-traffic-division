@@ -172,6 +172,23 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Asking for the buffer early
+    |--------------------------------------------------------------------------
+    |
+    | Results batch on the prober's slow cadence because every delivery wakes an
+    | application that sleeps between requests. While somebody is on the screens
+    | that application is awake anyway, so opening one asks the probers for what
+    | they are holding if the last delivery is older than this.
+    |
+    | It only ever buys the green: anything down, and any monitor changing status
+    | at all, arrives within the minute regardless. Zero turns it off.
+    |
+    */
+
+    'flush_when_stale_after_minutes' => 5,
+
+    /*
+    |--------------------------------------------------------------------------
     | Signature tolerance
     |--------------------------------------------------------------------------
     |

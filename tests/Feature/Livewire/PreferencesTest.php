@@ -142,9 +142,140 @@ it('cannot set preferences against another owner\'s site', function () {
     expect(MonitorNotificationPreference::count())->toBe(0);
 });
 
+/**
+ * Push is delivered by a channel the host supplies, so the switch exists only
+ * where the host has named one. It starts off: nobody is pushed to until they
+ * say so.
+ */
+it('loads and saves push on a site when the host has a push channel', function () {
+    config()->set('monitoring.notification_channels.push', 'Host\\Notifications\\PushChannel');
+
+    MonitorNotificationPreference::create([
+        'notifiable_id' => $this->owner->id,
+        'site_id' => $this->site->id,
+        'push_enabled' => true,
+    ]);
+
+    $toggle = "wire:click=\"toggle('{$this->site->id}', null, 'push_enabled')\"";
+
+    $component = Livewire::test(NotificationPreferences::class)
+        ->call('toggleSite', $this->site->id)
+        ->assertSeeHtml('label="Push" checked="checked" '.$toggle);
+
+    // The monitor has no row of its own, so it follows the site.
+    expect(Monitoring::preferenceChannelsFor($this->owner, $this->monitor, 'uptime_failed'))
+        ->toBe(['mail', 'database', 'Host\\Notifications\\PushChannel']);
+
+    $component->call('toggle', $this->site->id, null, 'push_enabled')
+        ->assertSeeHtml('label="Push" '.$toggle);
+
+    expect(MonitorNotificationPreference::first()->push_enabled)->toBeFalse()
+        ->and(Monitoring::preferenceChannelsFor($this->owner, $this->monitor, 'uptime_failed'))
+        ->toBe(['mail', 'database']);
+});
+
+it('loads and saves push on one monitor when the host has a push channel', function () {
+    config()->set('monitoring.notification_channels.push', 'Host\\Notifications\\PushChannel');
+
+    $toggle = "wire:click=\"toggle('{$this->site->id}', {$this->monitor->id}, 'push_enabled')\"";
+
+    $component = Livewire::test(NotificationPreferences::class)
+        ->call('toggleSite', $this->site->id)
+        ->call('toggle', $this->site->id, $this->monitor->id, 'email_enabled')
+        ->assertSeeHtml('label="Push" '.$toggle)
+        ->call('toggle', $this->site->id, $this->monitor->id, 'push_enabled')
+        ->assertSeeHtml('label="Push" checked="checked" '.$toggle);
+
+    $row = MonitorNotificationPreference::whereNotNull('monitor_id')->first();
+
+    expect($row->push_enabled)->toBeTrue()
+        ->and(MonitorNotificationPreference::whereNotNull('site_id')->exists())->toBeFalse()
+        ->and(Monitoring::preferenceChannelsFor($this->owner, $this->monitor, 'uptime_failed'))
+        ->toBe(['database', 'Host\\Notifications\\PushChannel']);
+
+    // A fresh screen reads the saved row rather than remembering the toggle.
+    Livewire::test(NotificationPreferences::class)
+        ->call('toggleSite', $this->site->id)
+        ->assertSeeHtml('label="Push" checked="checked" '.$toggle);
+});
+
+it('offers no push switch when the host has not named a channel', function (?string $configured) {
+    config()->set('monitoring.notification_channels.push', $configured);
+
+    Livewire::test(NotificationPreferences::class)
+        ->call('toggleSite', $this->site->id)
+        ->call('toggle', $this->site->id, $this->monitor->id, 'email_enabled')
+        ->assertSeeHtml('label="Email"')
+        ->assertDontSeeHtml('push_enabled')
+        ->assertDontSeeHtml('label="Push"')
+        ->call('toggle', $this->site->id, null, 'push_enabled')
+        ->assertOk();
+
+    // Nothing to deliver it, so nothing to write either.
+    expect(MonitorNotificationPreference::whereNotNull('site_id')->exists())->toBeFalse();
+})->with([
+    'null' => [null],
+    'empty string' => [''],
+]);
+
+it('calls the database channel Desktop without renaming its column', function () {
+    Livewire::test(NotificationPreferences::class)
+        ->call('toggleSite', $this->site->id)
+        ->assertSeeHtml("label=\"Desktop\" checked=\"checked\" wire:click=\"toggle('{$this->site->id}', null, 'database_enabled')\"")
+        ->assertDontSeeHtml('label="In the app"')
+        ->call('toggle', $this->site->id, null, 'database_enabled');
+
+    expect(MonitorNotificationPreference::first()->database_enabled)->toBeFalse()
+        ->and(Monitoring::preferenceChannelsFor($this->owner, $this->monitor, 'uptime_failed'))
+        ->toBe(['mail']);
+});
+
+/**
+ * The closed site says how someone will be reached in the words on its
+ * switches. Channel keys and the host's push class are plumbing, not answers.
+ */
+it('summarises a closed site by the labels on its switches', function (?string $push, array $row, string $summary) {
+    config()->set('monitoring.notification_channels.push', $push);
+
+    MonitorNotificationPreference::create([
+        'notifiable_id' => $this->owner->id,
+        'site_id' => $this->site->id,
+        ...$row,
+    ]);
+
+    $html = Livewire::test(NotificationPreferences::class)
+        ->assertDontSee('Host\\Notifications\\PushChannel')
+        ->assertDontSee('database')
+        ->assertDontSee('vonage')
+        ->html();
+
+    // The summary is the line under the site's name on its closed card.
+    preg_match("/wire:click=\"toggleSite\('{$this->site->id}'\)\".*?data-flux-text\s*>(.*?)<\/p>/s", $html, $match);
+
+    expect(trim(strip_tags($match[1] ?? '')))->toBe($summary);
+})->with([
+    'push configured and on' => [
+        'Host\\Notifications\\PushChannel',
+        ['email_enabled' => false, 'push_enabled' => true],
+        'Desktop, Push',
+    ],
+    'push not configured, SMS on' => [
+        null,
+        ['sms_enabled' => true, 'push_enabled' => true],
+        'Email, Desktop, SMS',
+    ],
+    'the event switched off' => [
+        'Host\\Notifications\\PushChannel',
+        ['push_enabled' => true, 'uptime_failed' => false],
+        'Nothing',
+    ],
+]);
+
 it('shows the sites it can set preferences for', function () {
     Livewire::test(NotificationPreferences::class)
         ->assertOk()
         ->assertSee('acme.test')
-        ->assertSee('Following the defaults');
+        ->assertSee('Following the defaults')
+        ->assertSee('email and a Desktop notification')
+        ->assertDontSee('a notification in the app');
 });
