@@ -18,8 +18,10 @@
                     <x-monitoring::status-pill status="paused" />
                 @elseif ($monitor->isDown())
                     <x-monitoring::status-pill status="down" />
-                @else
+                @elseif ($monitor->isUp())
                     <x-monitoring::status-pill status="up" />
+                @else
+                    <x-monitoring::status-pill status="unknown" label="?" />
                 @endif
 
                 @if ($monitor->critical)

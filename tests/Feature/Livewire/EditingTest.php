@@ -3,6 +3,7 @@
 use Abigah\BotCopTrafficDivision\Enums\HeartbeatKind;
 use Abigah\BotCopTrafficDivision\Facades\Monitoring;
 use Abigah\BotCopTrafficDivision\Jobs\NotifyProbersOfChange;
+use Abigah\BotCopTrafficDivision\Jobs\RequestProberCheck;
 use Abigah\BotCopTrafficDivision\Livewire\SiteOverview;
 use Abigah\BotCopTrafficDivision\Models\Monitor;
 use Abigah\BotCopTrafficDivision\Models\MonitoredSite;
@@ -103,6 +104,60 @@ it('deletes a monitor', function () {
     ($this->page)()->call('deleteMonitor', $monitor->id);
 
     expect(Monitor::count())->toBe(0);
+});
+
+it('asks the probers to check a monitor now', function () {
+    config()->set('monitoring.checker', 'remote');
+
+    Queue::fake();
+
+    $monitor = $this->site->monitors()->create(['url' => 'https://acme.test/', 'owner_id' => $this->owner->id]);
+
+    ($this->page)()
+        ->assertSee('Check now')
+        ->call('checkMonitorNow', $monitor->id)
+        ->assertSee('Check requested');
+
+    Queue::assertPushed(RequestProberCheck::class, fn ($job) => $job->monitorId === $monitor->id);
+});
+
+/**
+ * A check run from here would prove less than one from outside, and a paused
+ * monitor is not in the manifest a prober checks from.
+ */
+it('offers no check when there is no prober to ask, or nothing for it to check', function () {
+    Queue::fake();
+
+    $monitor = $this->site->monitors()->create(['url' => 'https://acme.test/', 'owner_id' => $this->owner->id]);
+
+    config()->set('monitoring.checker', 'local');
+
+    ($this->page)()
+        ->assertDontSee('Check now')
+        ->call('checkMonitorNow', $monitor->id);
+
+    config()->set('monitoring.checker', 'remote');
+    $monitor->forceFill(['uptime_check_enabled' => false])->save();
+
+    ($this->page)()
+        ->assertDontSee('Check now')
+        ->call('checkMonitorNow', $monitor->id);
+
+    Queue::assertNotPushed(RequestProberCheck::class);
+});
+
+it('cannot request a check on another owner\'s monitor', function () {
+    config()->set('monitoring.checker', 'remote');
+
+    Queue::fake();
+
+    $stranger = User::create(['name' => 'Stranger', 'email' => 'stranger@test.dev']);
+    $theirs = MonitoredSite::create(['name' => 'theirs.test', 'owner_id' => $stranger->id]);
+    $monitor = $theirs->monitors()->create(['url' => 'https://theirs.test/', 'owner_id' => $stranger->id]);
+
+    ($this->page)()->call('checkMonitorNow', $monitor->id);
+
+    Queue::assertNotPushed(RequestProberCheck::class);
 });
 
 /**

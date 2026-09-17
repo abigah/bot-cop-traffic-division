@@ -77,6 +77,7 @@ class SiteOverview extends Component
             'heartbeats' => $site->heartbeats()->orderBy('name')->get(),
             'exceptions' => $site->siteExceptions()->unresolved()->orderByDesc('last_seen_at')->limit(20)->get(),
             'incidents' => $query->incidents()->whereIn('monitor_id', $monitors->modelKeys())->limit(10)->get(),
+            'checksRemotely' => Monitoring::checksRemotely(),
             'deployment' => $site->deployments()->ongoing()->latest('started_at')->first(),
             'stats' => $query->stats($period, includeIncidents: true, monitorIds: $monitors->modelKeys()),
             'chart' => $query->chartData($period, $this->timezone(), monitorIds: $monitors->modelKeys()),

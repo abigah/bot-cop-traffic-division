@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+**Check a monitor now.** In remote mode each monitor row on the site page has a
+"Check now" button. It queues a signed, empty-bodied
+`POST {prober}/tenants/{tenant}/monitors/{monitor}/check` to every prober,
+unique per monitor for a minute. The prober checks from outside as usual and
+delivers the answer on its next sweep instead of holding it for the batch.
+Needs a prober that serves the endpoint; older ones answer 404, which is logged.
+
+**A monitor that has never been checked shows "?"** rather than "Up".
+
 ## v0.1.11
 
 **The screens ask the probers for what they are holding.**

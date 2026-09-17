@@ -98,8 +98,10 @@
                                 <x-monitoring::status-pill status="paused" />
                             @elseif ($monitor->isDown())
                                 <x-monitoring::status-pill status="down" />
-                            @else
+                            @elseif ($monitor->isUp())
                                 <x-monitoring::status-pill status="up" />
+                            @else
+                                <x-monitoring::status-pill status="unknown" label="?" />
                             @endif
                         </flux:table.cell>
                         <flux:table.cell>
@@ -117,6 +119,13 @@
                         </flux:table.cell>
                         <flux:table.cell>
                             <div class="flex justify-end gap-1">
+                                @if ($checksRemotely && $monitor->uptime_check_enabled)
+                                    @if (in_array($monitor->id, $checkRequestedFor, true))
+                                        <flux:button size="xs" variant="ghost" disabled>Check requested</flux:button>
+                                    @else
+                                        <flux:button size="xs" variant="ghost" wire:click="checkMonitorNow({{ $monitor->id }})">Check now</flux:button>
+                                    @endif
+                                @endif
                                 <flux:button size="xs" variant="ghost" wire:click="editMonitor({{ $monitor->id }})">Edit</flux:button>
                                 <flux:button size="xs" variant="ghost" wire:click="toggleMonitorPaused({{ $monitor->id }})">
                                     {{ $monitor->uptime_check_enabled ? 'Pause' : 'Resume' }}
@@ -365,7 +374,7 @@
                 type="number"
                 wire:model="monitorForm.interval"
                 label="Check every (minutes)"
-                :description="'The shortest this tenant allows is '.$this->minimumInterval().' minutes.'"
+                :description:trailing="'Minimum '.$this->minimumInterval().' minutes.'"
             />
         </div>
 

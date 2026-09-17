@@ -58,6 +58,16 @@ it('shows monitors, jobs and errors together', function () {
         ->assertSee('37 times');
 });
 
+/**
+ * Nothing has been heard about it yet, so calling it up would be a guess.
+ */
+it('shows a monitor that has never been checked as unknown rather than up', function () {
+    $this->monitor->forceFill(['uptime_status' => UptimeStatus::NOT_YET_CHECKED->value])->save();
+
+    Livewire::test(SiteOverview::class, ['site' => $this->site->id])
+        ->assertSeeInOrder(['https://acme.test/', '?', 'Never']);
+});
+
 it('warns while a deployment is suppressing alerting', function () {
     $this->site->startDeployment();
 

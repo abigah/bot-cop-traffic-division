@@ -2,6 +2,8 @@
 
 namespace Abigah\BotCopTrafficDivision\Livewire\Concerns;
 
+use Abigah\BotCopTrafficDivision\Facades\Monitoring;
+use Abigah\BotCopTrafficDivision\Jobs\RequestProberCheck;
 use Abigah\BotCopTrafficDivision\Models\Monitor;
 use Abigah\BotCopTrafficDivision\Services\MonitorQuery;
 use Illuminate\Validation\Rule;
@@ -21,6 +23,14 @@ trait ManagesMonitors
 
     /** @var array<string, mixed> */
     public array $monitorForm = [];
+
+    /**
+     * Monitors a check has been asked for from this page, so the button says
+     * so rather than inviting a second press that would change nothing.
+     *
+     * @var array<int, int>
+     */
+    public array $checkRequestedFor = [];
 
     public function newMonitor(): void
     {
@@ -105,6 +115,31 @@ trait ManagesMonitors
         }
 
         $model->forceFill(['uptime_check_enabled' => ! $model->uptime_check_enabled])->save();
+    }
+
+    /**
+     * Ask the probers to check this monitor now.
+     *
+     * Remote mode only: the checks come from outside this infrastructure, and a
+     * check run from here instead would prove less and land in the same
+     * timeline. A paused monitor is not in the manifest, so there is nothing
+     * for a prober to check.
+     */
+    public function checkMonitorNow(int $monitor): void
+    {
+        if (! Monitoring::checksRemotely()) {
+            return;
+        }
+
+        $model = MonitorQuery::forCurrentOwner()->findMonitor($monitor);
+
+        if ($model === null || (string) $model->site_id !== (string) $this->siteId || ! $model->uptime_check_enabled) {
+            return;
+        }
+
+        RequestProberCheck::dispatch($model->getKey());
+
+        $this->checkRequestedFor[] = $model->getKey();
     }
 
     public function deleteMonitor(int $monitor): void
