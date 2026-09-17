@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.1.12
 
 **Check a monitor now.** In remote mode each monitor row on the site page has a
 "Check now" button. It queues a signed, empty-bodied
