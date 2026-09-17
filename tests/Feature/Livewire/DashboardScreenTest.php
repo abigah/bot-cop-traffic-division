@@ -123,6 +123,20 @@ it('shows the banner during an outage', function () {
         ->assertSee('https://acme.test/');
 });
 
+/**
+ * The banner sits in the host's layout, so the screen somebody is deleting from
+ * cannot re-render it. It has to hear about it.
+ */
+it('clears the banner when the monitor behind it is deleted', function () {
+    $this->monitor->recordUptimeResult(CheckResult::down('Connection refused'));
+
+    $banner = Livewire::test(ActiveIncidentBanner::class)->assertSee('1 monitor down');
+
+    $this->monitor->delete();
+
+    $banner->dispatch('monitoring-incidents-changed')->assertDontSee('1 monitor down');
+});
+
 it('lists incidents and filters them', function () {
     $this->monitor->recordUptimeResult(CheckResult::down('Connection refused'));
 

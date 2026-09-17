@@ -101,7 +101,10 @@ it('pauses and resumes a monitor', function () {
 it('deletes a monitor', function () {
     $monitor = $this->site->monitors()->create(['url' => 'https://acme.test/', 'owner_id' => $this->owner->id]);
 
-    ($this->page)()->call('deleteMonitor', $monitor->id);
+    ($this->page)()
+        ->call('deleteMonitor', $monitor->id)
+        // The banner is in the layout, not on this page, so it has to be told.
+        ->assertDispatched('monitoring-incidents-changed');
 
     expect(Monitor::count())->toBe(0);
 });

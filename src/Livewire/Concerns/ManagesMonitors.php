@@ -153,6 +153,10 @@ trait ManagesMonitors
         // Its checks, incidents and aggregates go with it: this is a deletion,
         // not an archive, and half-deleted history is worse than none.
         $model->delete();
+
+        // The banner lives in the layout and would otherwise go on naming this
+        // monitor as down until somebody reloaded the page.
+        $this->dispatch('monitoring-incidents-changed');
     }
 
     /** @return array<string, mixed> */

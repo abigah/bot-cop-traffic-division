@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.1.13
+
+**The incident banner hears about a deleted monitor.** It sits in the host's
+layout rather than on the screen somebody is working on, so deleting a monitor
+left it naming that monitor as down until the page was reloaded. Deleting now
+dispatches `monitoring-incidents-changed`, which the banner listens for.
+
 ## v0.1.12
 
 **Check a monitor now.** In remote mode each monitor row on the site page has a
