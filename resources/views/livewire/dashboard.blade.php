@@ -52,10 +52,14 @@
             <flux:heading size="lg">Down now</flux:heading>
 
             @forelse ($ongoing as $incident)
+                @php($owner = $ownerOfMonitor($incident->monitor))
                 <div class="border-b border-zinc-100 py-2 last:border-0 dark:border-zinc-800">
-                    <flux:link href="{{ route('monitoring.monitor.history', ['monitor' => $incident->monitor_id]) }}">
+                    <flux:link href="{{ $urlOnOwner($owner, route('monitoring.monitor.history', ['monitor' => $incident->monitor_id])) }}">
                         {{ $incident->monitor?->url }}
                     </flux:link>
+                    @if ($showsOwners && $owner)
+                        <flux:text variant="subtle" class="text-xs">{{ $owner->name }}</flux:text>
+                    @endif
                     <flux:text variant="subtle" class="text-xs">
                         {{ $incident->started_at->diffForHumans() }} · {{ $incident->failure_reason }}
                     </flux:text>
@@ -69,10 +73,14 @@
             <flux:heading size="lg">Stopped running</flux:heading>
 
             @forelse ($missedJobs as $heartbeat)
+                @php($owner = $ownerOfSite($heartbeat->site_id))
                 <div class="border-b border-zinc-100 py-2 last:border-0 dark:border-zinc-800">
-                    <flux:link href="{{ route('monitoring.site', ['site' => $heartbeat->site_id]) }}">
+                    <flux:link href="{{ $urlOnOwner($owner, route('monitoring.site', ['site' => $heartbeat->site_id])) }}">
                         {{ $heartbeat->name }}
                     </flux:link>
+                    @if ($showsOwners && $owner)
+                        <flux:text variant="subtle" class="text-xs">{{ $owner->name }}</flux:text>
+                    @endif
                     <flux:text variant="subtle" class="text-xs">
                         {{ Str::headline($heartbeat->status->value) }} ·
                         last seen {{ $heartbeat->last_ping_at?->diffForHumans() ?? 'never' }}
@@ -87,10 +95,14 @@
             <flux:heading size="lg">New errors</flux:heading>
 
             @forelse ($newErrors as $error)
+                @php($owner = $ownerOfSite($error->site_id))
                 <div class="border-b border-zinc-100 py-2 last:border-0 dark:border-zinc-800">
-                    <flux:link href="{{ route('monitoring.site', ['site' => $error->site_id]) }}">
+                    <flux:link href="{{ $urlOnOwner($owner, route('monitoring.site', ['site' => $error->site_id])) }}">
                         {{ class_basename(str_replace('\\', '/', $error->exception_class)) }}
                     </flux:link>
+                    @if ($showsOwners && $owner)
+                        <flux:text variant="subtle" class="text-xs">{{ $owner->name }}</flux:text>
+                    @endif
                     <flux:text variant="subtle" class="truncate text-xs">{{ $error->message }}</flux:text>
                     <flux:text variant="subtle" class="text-xs">
                         {{ $error->occurrences }} {{ Str::plural('time', $error->occurrences) }}

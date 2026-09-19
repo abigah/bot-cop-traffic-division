@@ -14,6 +14,7 @@ use Carbon\Carbon;
 use Closure;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Contracts\Support\Arrayable;
+use Illuminate\Support\Collection;
 use RuntimeException;
 
 /**
@@ -24,6 +25,10 @@ use RuntimeException;
 class Monitoring
 {
     protected ?Closure $currentOwnerResolver = null;
+
+    protected ?Closure $dashboardOwnersResolver = null;
+
+    protected ?Closure $ownerUrlResolver = null;
 
     protected ?Closure $recipientsResolver = null;
 
@@ -48,6 +53,26 @@ class Monitoring
     public function resolveCurrentOwnerUsing(Closure $resolver): void
     {
         $this->currentOwnerResolver = $resolver;
+    }
+
+    /**
+     * The owners the dashboard looks across, for a host whose users belong to
+     * several. Without it the dashboard shows the current owner alone.
+     */
+    public function resolveDashboardOwnersUsing(Closure $resolver): void
+    {
+        $this->dashboardOwnersResolver = $resolver;
+    }
+
+    /**
+     * How to open one of the package's screens on an owner other than the
+     * current one, given that owner and the screen's URL: a host that switches
+     * owners returns a URL that switches and then goes there. Without it the
+     * screen's own URL is used, and the screen finds nothing of that owner's.
+     */
+    public function resolveOwnerUrlUsing(Closure $resolver): void
+    {
+        $this->ownerUrlResolver = $resolver;
     }
 
     public function resolveRecipientsUsing(Closure $resolver): void
@@ -152,6 +177,40 @@ class Monitoring
     public function currentOwner(): mixed
     {
         return $this->guard($this->currentOwnerResolver, 'resolveCurrentOwnerUsing')();
+    }
+
+    /**
+     * The owners the dashboard looks across: the host's answer, or the current
+     * owner alone. Always includes the current owner.
+     *
+     * @return Collection<int, mixed>
+     */
+    public function dashboardOwners(): Collection
+    {
+        $current = $this->currentOwner();
+
+        $owners = $this->dashboardOwnersResolver === null
+            ? collect()
+            : collect(($this->dashboardOwnersResolver)())->values();
+
+        if ($current !== null && ! $owners->contains(fn (mixed $owner): bool => (string) $owner->getKey() === (string) $current->getKey())) {
+            $owners->prepend($current);
+        }
+
+        return $owners->values();
+    }
+
+    /**
+     * A URL that opens the given screen URL on the given owner. The current
+     * owner's screens open as they are.
+     */
+    public function urlOnOwner(mixed $owner, string $url): string
+    {
+        if ($this->ownerUrlResolver === null || $owner === null || (string) $owner->getKey() === (string) $this->currentOwner()?->getKey()) {
+            return $url;
+        }
+
+        return ($this->ownerUrlResolver)($owner, $url);
     }
 
     /**

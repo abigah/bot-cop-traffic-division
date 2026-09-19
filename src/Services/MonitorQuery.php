@@ -14,6 +14,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Collection;
+use LogicException;
 use RuntimeException;
 
 /**
@@ -28,14 +29,31 @@ use RuntimeException;
  */
 class MonitorQuery
 {
-    private function __construct(private readonly mixed $ownerKey) {}
+    /**
+     * @param  list<mixed>  $ownerKeys
+     */
+    private function __construct(private readonly array $ownerKeys) {}
 
     /**
      * Scope to an owner by key.
      */
     public static function forOwner(mixed $ownerKey): self
     {
-        return new self($ownerKey);
+        return new self([$ownerKey]);
+    }
+
+    /**
+     * Scope to several owners at once, for a screen that looks across every
+     * owner someone belongs to rather than the one they have selected.
+     *
+     * Such a query reads and never creates: a new record needs exactly one
+     * owner, so ownerKey() refuses to pick one of these.
+     *
+     * @param  iterable<int, mixed>  $ownerKeys
+     */
+    public static function forOwners(iterable $ownerKeys): self
+    {
+        return new self(array_values(array_unique(collect($ownerKeys)->all(), SORT_REGULAR)));
     }
 
     /**
@@ -51,16 +69,35 @@ class MonitorQuery
             );
         }
 
-        return new self($owner->getKey());
-    }
-
-    public function ownerKey(): mixed
-    {
-        return $this->ownerKey;
+        return new self([$owner->getKey()]);
     }
 
     /**
-     * This owner's sites, in the order the host returns them.
+     * The one owner this query is scoped to, which is who a new record belongs
+     * to.
+     */
+    public function ownerKey(): mixed
+    {
+        if (count($this->ownerKeys) !== 1) {
+            throw new LogicException('This query is scoped to '.count($this->ownerKeys).' owners, so it has no single owner to give a new record to.');
+        }
+
+        return $this->ownerKeys[0];
+    }
+
+    /**
+     * Every owner this query is scoped to.
+     *
+     * @return list<mixed>
+     */
+    public function ownerKeys(): array
+    {
+        return $this->ownerKeys;
+    }
+
+    /**
+     * This owner's sites, in the order the host returns them, each owner's in
+     * turn when there are several.
      *
      * The site model is the host's, so this goes through the resolver rather
      * than querying a table the package may not own.
@@ -69,11 +106,22 @@ class MonitorQuery
      */
     public function sites(): Collection
     {
-        $owner = Monitoring::ownerModel()::find($this->ownerKey);
+        return $this->sitesByOwner()->flatten(1)->values();
+    }
 
-        return $owner === null
-            ? collect()
-            : collect(Monitoring::sitesFor($owner));
+    /**
+     * Each owner's sites, keyed by the owner's key, in the order the owners
+     * were given. An owner that no longer exists has none.
+     *
+     * @return Collection<array-key, Collection<int, Model>>
+     */
+    public function sitesByOwner(): Collection
+    {
+        $owners = Monitoring::ownerModel()::findMany($this->ownerKeys)->keyBy(fn (Model $owner): mixed => $owner->getKey());
+
+        return collect($this->ownerKeys)
+            ->filter(fn (mixed $key): bool => $owners->has($key))
+            ->mapWithKeys(fn (mixed $key): array => [$key => collect(Monitoring::sitesFor($owners->get($key)))->values()]);
     }
 
     /** @return list<int|string> */
@@ -126,7 +174,7 @@ class MonitorQuery
      */
     public function monitors(): Builder
     {
-        return Monitor::query()->forOwner($this->ownerKey);
+        return Monitor::query()->whereIn('owner_id', $this->ownerKeys);
     }
 
     /**

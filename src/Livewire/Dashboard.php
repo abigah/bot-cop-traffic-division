@@ -13,6 +13,10 @@ use Livewire\Component;
  *
  * It answers three questions and stops: is anything down, has anything stopped
  * running, and is anything throwing errors it did not throw yesterday.
+ *
+ * It asks them across every owner the host names for the dashboard, not only
+ * the current one, so someone on several sees everything at once. Each row
+ * then says whose it is, and links through the host to open it as that owner.
  */
 class Dashboard extends Component
 {
@@ -28,9 +32,14 @@ class Dashboard extends Component
 
     public function render(): View
     {
-        $query = MonitorQuery::forCurrentOwner();
+        $owners = Monitoring::dashboardOwners()->keyBy(fn ($owner) => $owner->getKey());
+        $query = MonitorQuery::forOwners($owners->keys());
         $period = Period::fromValue($this->period);
         $user = auth()->user();
+
+        $siteOwners = $query->sitesByOwner()
+            ->flatMap(fn ($sites, $ownerKey) => $sites->map(fn ($site) => [$site->getKey(), $ownerKey]))
+            ->mapWithKeys(fn (array $siteOwner) => [$siteOwner[0] => $siteOwner[1]]);
 
         return view('monitoring::livewire.dashboard', [
             'summary' => $query->summary($period),
@@ -46,6 +55,10 @@ class Dashboard extends Component
                 ->where('last_seen_at', '>=', now()->subDay())
                 ->limit(10)
                 ->get(),
+            'showsOwners' => $owners->count() > 1,
+            'ownerOfSite' => fn ($siteId) => $owners->get($siteOwners->get($siteId)),
+            'ownerOfMonitor' => fn ($monitor) => $owners->get($monitor?->owner_id),
+            'urlOnOwner' => fn ($owner, string $url): string => Monitoring::urlOnOwner($owner, $url),
         ]);
     }
 }

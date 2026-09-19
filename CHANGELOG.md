@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.1.14
+
+**The dashboard looks across every owner someone belongs to.** A host whose
+users belong to several owners names them with
+`Monitoring::resolveDashboardOwnersUsing(fn () => [...])`, and the dashboard's
+counts, uptime, chart, incidents, missed jobs and new errors cover all of them.
+The current owner is always included; without the resolver the dashboard shows
+the current owner alone, as before.
+
+When it covers more than one owner, each row names its owner. The other screens
+still open on the current owner only, so a row belonging to another owner links
+through `Monitoring::resolveOwnerUrlUsing(fn ($owner, string $url) => ...)`,
+which a host that switches owners answers with a URL that switches and then
+goes there.
+
+`MonitorQuery::forOwners()` scopes a query to several owners, and
+`sitesByOwner()` groups their sites. Such a query only reads: `ownerKey()`
+throws, since a new record needs exactly one owner.
+
 ## v0.1.13
 
 **The incident banner hears about a deleted monitor.** It sits in the host's

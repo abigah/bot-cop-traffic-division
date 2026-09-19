@@ -7,6 +7,7 @@ use Abigah\BotCopTrafficDivision\Livewire\Dashboard;
 use Abigah\BotCopTrafficDivision\Livewire\Incidents;
 use Abigah\BotCopTrafficDivision\Livewire\MonitorHistory;
 use Abigah\BotCopTrafficDivision\Models\MonitoredSite;
+use Abigah\BotCopTrafficDivision\Services\MonitorQuery;
 use Abigah\BotCopTrafficDivision\Support\CheckResult;
 use Abigah\BotCopTrafficDivision\Tests\Fixtures\User;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -108,6 +109,58 @@ it('draws the response time chart on the server', function () {
         ->assertSeeHtml('class="fill-sky-500"')
         ->assertDontSeeHtml('x-for');
 });
+
+/**
+ * Someone on several owners sees all of them at once, each row saying whose it
+ * is and opening through the host as that owner.
+ */
+it('looks across every owner the host names for the dashboard', function () {
+    $other = User::create(['name' => 'Other Co.', 'email' => 'other@test.dev']);
+    $otherSite = MonitoredSite::create(['name' => 'other.test', 'owner_id' => $other->id]);
+    $otherMonitor = $otherSite->monitors()->create(['url' => 'https://other.test/', 'owner_id' => $other->id, 'critical' => true]);
+
+    Monitoring::resolveSitesUsing(fn ($owner) => MonitoredSite::where('owner_id', $owner->id)->get());
+    Monitoring::resolveDashboardOwnersUsing(fn () => [$this->owner, $other]);
+    Monitoring::resolveOwnerUrlUsing(fn ($owner, string $url) => 'https://host.test/switch/'.$owner->id.'?to='.urlencode($url));
+
+    $this->monitor->recordUptimeResult(CheckResult::down('Connection refused'));
+    $otherMonitor->recordUptimeResult(CheckResult::down('Timed out'));
+
+    $otherSite->heartbeats()->create([
+        'name' => 'Other digest',
+        'token' => Str::random(48),
+        'interval_minutes' => 60,
+        'status' => HeartbeatStatus::MISSING->value,
+    ]);
+
+    $otherUrl = route('monitoring.monitor.history', ['monitor' => $otherMonitor->id]);
+    $otherSiteUrl = route('monitoring.site', ['site' => $otherSite->id]);
+
+    Livewire::test(Dashboard::class)
+        ->assertSeeInOrder(['Sites down', '2', 'of 2'])
+        ->assertSee('https://acme.test/')
+        ->assertSee('https://other.test/')
+        ->assertSee('Other Co.')
+        ->assertSee('Other digest')
+        ->assertSeeHtml('href="https://host.test/switch/'.$other->id.'?to='.urlencode($otherUrl).'"')
+        ->assertSeeHtml('href="https://host.test/switch/'.$other->id.'?to='.urlencode($otherSiteUrl).'"')
+        ->assertSeeHtml('href="'.route('monitoring.monitor.history', ['monitor' => $this->monitor->id]).'"');
+});
+
+it('shows only the current owner when the host names no dashboard owners', function () {
+    $other = User::create(['name' => 'Other Co.', 'email' => 'other@test.dev']);
+    $otherSite = MonitoredSite::create(['name' => 'other.test', 'owner_id' => $other->id]);
+    $otherSite->monitors()->create(['url' => 'https://other.test/', 'owner_id' => $other->id, 'critical' => true])
+        ->recordUptimeResult(CheckResult::down('Timed out'));
+
+    Livewire::test(Dashboard::class)
+        ->assertDontSee('https://other.test/')
+        ->assertDontSee('Other Co.');
+});
+
+it('refuses to give a query across several owners a single owner', function () {
+    MonitorQuery::forOwners([1, 2])->ownerKey();
+})->throws(LogicException::class);
 
 it('renders nothing in the banner when everything is up', function () {
     Livewire::test(ActiveIncidentBanner::class)
